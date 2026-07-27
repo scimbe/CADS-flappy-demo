@@ -3,8 +3,10 @@
 # SAME publishing shape as examples/help-site (help.bunsenbrenner.org).
 #
 # This is an OPTIONAL demo subsystem: bring it up to enable, `down` to take it
-# offline. It runs ALONGSIDE an already-running plane (ct-edge with
-# CT_EDGE_BROWSER_LISTEN=:443 + a ct-control-plane the agent onboards against).
+# offline. flappy-agent onboards as a remote agent against a control-plane/edge
+# that does NOT have to run on this host (e.g. the hosted bunsenbrenner.org
+# plane) — CT_AGENT_CP_URL/CT_AGENT_EDGE just need to be reachable over the
+# network, so this stack only needs its own private compose network.
 #
 #   enable:   examples/flappy-demo/run-demo.sh up      (or: docker compose -f … up -d)
 #   disable:  examples/flappy-demo/run-demo.sh down     (takes the demo offline)
@@ -39,7 +41,7 @@ services:
   flappy-agent:
     # The workspace ct-agent image, in Browser-Plane mode (SNI passthrough).
     build:
-      context: ../..
+      context: ${CT_TUNNEL_SRC:-../CADS-Tunnel}
       dockerfile: docker/Dockerfile
       args:
         - CRATE=ct-agent
@@ -82,7 +84,7 @@ services:
     # CT_CHANNEL_RELAY_ONLY=1 per role. Until then this service starts but every /crew/build 502s
     # (the browser fails closed to its local stand-in) — the demo page still works, just locally.
     build:
-      context: ../..
+      context: ${CT_TUNNEL_SRC:-../CADS-Tunnel}
       dockerfile: docker/Dockerfile
       args:
         - CRATE=ct-agent
@@ -128,10 +130,11 @@ volumes:
   flappy_caddy_data:
   flappy_agent_state:
 
-# Join the running self-host plane's network so flappy-agent/flappy-origin can reach
-# `edge` and `control-plane`. The base stack (compose.selfhost.yml, name: ct-selfhost)
-# creates the ct-selfhost_default network; bring it up first.
+# This stack's own private network — sufficient when onboarding against a
+# remote/hosted control-plane (e.g. bunsenbrenner.org): the agent only needs
+# CT_AGENT_CP_URL/CT_AGENT_EDGE reachable over the network, not shared docker
+# networking with the plane. If the plane ever runs on THIS same host again,
+# switch back to an external `ct-selfhost_default` network instead.
 networks:
   default:
-    name: ct-selfhost_default
-    external: true
+    name: flappy-demo_default
