@@ -27,9 +27,10 @@ flappy-demo.bunsenbrenner.org {
 		# deSEC enforces a zone minimum_ttl of 3600s and rejects TTL 0 (HTTP 400).
 		dns_ttl 3600s
 		# Give LE's multi-vantage-point validation time to read the TXT before Caddy
-		# deletes it.
-		propagation_delay 30s
-		propagation_timeout 2m
+		# deletes it. 30s/2m wasn't enough in practice against deSEC's real
+		# propagation latency — a first attempt NXDOMAIN'd, so widened this.
+		propagation_delay 45s
+		propagation_timeout 4m
 	}
 	header {
 		Strict-Transport-Security "max-age=31536000"

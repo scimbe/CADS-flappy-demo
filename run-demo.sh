@@ -56,20 +56,27 @@ RESOLVED="$(getent hosts "$HOSTNAME_FQDN" 2>/dev/null | awk '{print $1; exit}')"
 [ -n "$RESOLVED" ] && echo "   $HOSTNAME_FQDN -> $RESOLVED" \
   || echo "   ! $HOSTNAME_FQDN does not resolve yet (deSEC NS may still be propagating)."
 
-say "Minting a join token at $CP_URL/enroll/issue"
-if [ -n "$EDGE_ADMIN_TOKEN" ]; then
-  TOKEN="$(curl -fsS -X POST "$CP_URL/enroll/issue" -H 'content-type: application/json' \
-            -H "x-ct-admin-token: $EDGE_ADMIN_TOKEN" -d "{\"tenant\":\"$TENANT\"}" \
-            | sed -n 's/.*"token":"\([0-9a-f]\{64\}\)".*/\1/p')"
+if [ -n "${JOIN_TOKEN:-}" ]; then
+  say "Using pre-minted join token (JOIN_TOKEN env — /enroll/issue is admin-gated on this deployment)"
+  TOKEN="$JOIN_TOKEN"
 else
-  TOKEN="$(curl -fsS -X POST "$CP_URL/enroll/issue" -H 'content-type: application/json' \
-            -d "{\"tenant\":\"$TENANT\"}" | sed -n 's/.*"token":"\([0-9a-f]\{64\}\)".*/\1/p')"
+  say "Minting a join token at $CP_URL/enroll/issue"
+  if [ -n "$EDGE_ADMIN_TOKEN" ]; then
+    TOKEN="$(curl -fsS -X POST "$CP_URL/enroll/issue" -H 'content-type: application/json' \
+              -H "x-ct-admin-token: $EDGE_ADMIN_TOKEN" -d "{\"tenant\":\"$TENANT\"}" \
+              | sed -n 's/.*"token":"\([0-9a-f]\{64\}\)".*/\1/p')"
+  else
+    TOKEN="$(curl -fsS -X POST "$CP_URL/enroll/issue" -H 'content-type: application/json' \
+              -d "{\"tenant\":\"$TENANT\"}" | sed -n 's/.*"token":"\([0-9a-f]\{64\}\)".*/\1/p')"
+  fi
 fi
-[ -n "$TOKEN" ] || die "could not mint a join token (if the CP gates /enroll/issue per #87, set CT_CP_EDGE_ADMIN_TOKEN in $ENV_FILE)"
-echo "   token minted (single-use; not printed)"
+[ -n "$TOKEN" ] || die "could not mint a join token (if the CP gates /enroll/issue per #87, set CT_CP_EDGE_ADMIN_TOKEN in $ENV_FILE, or pass a pre-minted one via JOIN_TOKEN)"
+echo "   token ready (single-use; not printed)"
 
-FLAPPY_AGENT_TOKEN=""
-if [ -n "$EDGE_ADMIN_URL" ] && [ -n "$EDGE_ADMIN_TOKEN" ]; then
+if [ -n "${AGENT_ROUTING_TOKEN:-}" ]; then
+  say "Using pre-authorized routing token (AGENT_ROUTING_TOKEN env — BP4b already done out-of-band)"
+  FLAPPY_AGENT_TOKEN="$AGENT_ROUTING_TOKEN"
+elif [ -n "$EDGE_ADMIN_URL" ] && [ -n "$EDGE_ADMIN_TOKEN" ]; then
   command -v openssl >/dev/null || die "openssl needed to mint a routing token (or unset CT_CP_EDGE_ADMIN_URL to use BP4a)."
   FLAPPY_AGENT_TOKEN="$(openssl rand -hex 32)"
   say "Authorizing $HOSTNAME_FQDN at the edge (hostname-ownership, BP4b)"
@@ -78,6 +85,7 @@ if [ -n "$EDGE_ADMIN_URL" ] && [ -n "$EDGE_ADMIN_TOKEN" ]; then
     || die "edge authorize-host failed (check CT_CP_EDGE_ADMIN_URL / token / edge admin listener)."
   echo "   authorized — agent registers under this routing token."
 else
+  FLAPPY_AGENT_TOKEN=""
   echo "   ! edge host-auth not configured — relying on BP4a (fine for one hostname)."
 fi
 
@@ -86,8 +94,13 @@ fi
 # untracked $ENV_FILE) and NEVER stored — only its hash is written to gate.json
 # (which is gitignored). The page compares sha256(input) to this hash client-side.
 if [ -n "${FLAPPY_DEMO_PASSWORD:-}" ]; then
-  command -v sha256sum >/dev/null || die "sha256sum needed to derive the gate hash."
-  HASH="$(printf %s "$FLAPPY_DEMO_PASSWORD" | sha256sum | awk '{print $1}')"
+  if command -v sha256sum >/dev/null; then
+    HASH="$(printf %s "$FLAPPY_DEMO_PASSWORD" | sha256sum | awk '{print $1}')"
+  elif command -v shasum >/dev/null; then
+    HASH="$(printf %s "$FLAPPY_DEMO_PASSWORD" | shasum -a 256 | awk '{print $1}')"
+  else
+    die "need sha256sum (Linux) or shasum (macOS) to derive the gate hash."
+  fi
   printf '{"sha256":"%s"}\n' "$HASH" > gate.json
   echo "   gate.json written (hash only — plaintext is never stored on disk or in git)"
 elif [ -f gate.json ]; then
@@ -97,12 +110,22 @@ else
 fi
 
 say "Starting the Caddy origin + Browser-Plane agent"
-FLAPPY_JOIN_TOKEN="$TOKEN" \
-FLAPPY_AGENT_TOKEN="$FLAPPY_AGENT_TOKEN" \
-FLAPPY_AGENT_EDGE="$EDGE" \
-FLAPPY_AGENT_CP_URL="$CP_URL" \
-FLAPPY_AGENT_EDGE_CERT_URL="${FLAPPY_AGENT_EDGE_CERT_URL:-$CP_URL}" \
-  $COMPOSE up --build -d
+# Pass resolved values via a real --env-file rather than process-env prefixes:
+# on hosts where `docker` is a `sudo`-wrapping shim, sudo resets the environment
+# by default and strips prefixed vars before they ever reach `docker compose`,
+# so the compose file's ${VAR:?...} interpolation would fail even though the
+# values are correct. A file docker compose reads directly sidesteps that.
+COMPOSE_RUNTIME_ENV="$(mktemp)"
+trap 'rm -f "$COMPOSE_RUNTIME_ENV"' EXIT
+{
+  [ -f "$ENV_FILE" ] && cat "$ENV_FILE"
+  printf 'FLAPPY_JOIN_TOKEN=%s\n' "$TOKEN"
+  printf 'FLAPPY_AGENT_TOKEN=%s\n' "$FLAPPY_AGENT_TOKEN"
+  printf 'FLAPPY_AGENT_EDGE=%s\n' "$EDGE"
+  printf 'FLAPPY_AGENT_CP_URL=%s\n' "$CP_URL"
+  printf 'FLAPPY_AGENT_EDGE_CERT_URL=%s\n' "${FLAPPY_AGENT_EDGE_CERT_URL:-$CP_URL}"
+} > "$COMPOSE_RUNTIME_ENV"
+$COMPOSE --env-file "$COMPOSE_RUNTIME_ENV" up --build -d
 
 say "Waiting for https://$HOSTNAME_FQDN/ (Caddy completes the deSEC DNS-01 challenge first) …"
 for i in $(seq 1 60); do
