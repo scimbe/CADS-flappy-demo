@@ -47,7 +47,11 @@ fi
 
 # --- enable / online -----------------------------------------------------------
 say "Checking prerequisites"
-[ -n "${DESEC_TOKEN:-}" ] || die "DESEC_TOKEN is not set (Caddy needs it for the cert). See docs/dns01-desec.md; put it in $ENV_FILE."
+# #219: the cert is issued CORE-side (scripts/authorize-pipeline.sh) and relayed
+# out of band — this repo never runs an ACME client or holds a DESEC_TOKEN.
+FLAPPY_CERT_DIR="${FLAPPY_CERT_DIR:?set FLAPPY_CERT_DIR=<dir with fullchain.pem+privkey.pem from the operator>}"
+[ -f "$FLAPPY_CERT_DIR/fullchain.pem" ] && [ -f "$FLAPPY_CERT_DIR/privkey.pem" ] \
+  || die "no fullchain.pem/privkey.pem in FLAPPY_CERT_DIR=$FLAPPY_CERT_DIR — ask the operator to run scripts/authorize-pipeline.sh $HOSTNAME_FQDN and relay the cert files"
 command -v docker >/dev/null || die "docker not found."
 curl -fsS "$CP_URL/healthz" >/dev/null 2>&1 || curl -fsS "$CP_URL/status" >/dev/null 2>&1 \
   || die "control-plane not reachable at $CP_URL (is the plane running?). Set CP_URL."
