@@ -78,17 +78,22 @@ services:
     # that reads per-role vars ($$… = a literal $ so the bridge's own `sh -c` expands them at call
     # time, keeping the grants/keys in their own env vars rather than inlined into the command).
     #
+    # Thin-bridge migration (#219): the HTTP server + wire-format assembly used to be
+    # `ct-crew-bridge`, a binary built INSIDE CADS-Tunnel core. It's now plain Node
+    # (bridge/server.js, this repo) — only the generic `ct-agent` CLI (used by the CREW_*_CMD role
+    # dials below) still comes from core, via bridge/Dockerfile's named `tunnel-src` build context.
+    #
     # TARGET-STATE wiring (maintainer/central 2026-07-25 "wire it regardless"): the demo only goes
     # live once sink/source-2 actually serve `text_generation`/`safety_check` and central provisions
     # the per-role grants below (still #173's #1 blocker). A NAT'd bridge may also need
     # CT_CHANNEL_RELAY_ONLY=1 per role. Until then this service starts but every /crew/build 502s
     # (the browser fails closed to its local stand-in) — the demo page still works, just locally.
     build:
-      context: ${CT_TUNNEL_SRC:-../CADS-Tunnel}
-      dockerfile: docker/Dockerfile
-      args:
-        - CRATE=ct-agent
-    command: ["ct-crew-bridge"]
+      context: .
+      dockerfile: bridge/Dockerfile
+      additional_contexts:
+        tunnel-src: ${CT_TUNNEL_SRC:-../CADS-Tunnel}
+    command: ["node", "server.js"]
     # OPT-IN: the bridge only starts with `docker compose --profile crew up`. Without the profile the
     # default `up` brings up just the origin + Browser-Plane agent (the demo page, which fails closed
     # to its local stand-in) — so the demo is never held hostage to crew identities that don't exist
