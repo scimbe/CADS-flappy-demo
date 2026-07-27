@@ -1,5 +1,5 @@
 # Demo: serve https://flappy-demo.bunsenbrenner.org through the Browser Plane, with
-# a real Let's Encrypt certificate obtained at the origin via deSEC DNS-01 — the
+# a real Let's Encrypt certificate issued CORE-side via deSEC DNS-01 (#219) — the
 # SAME publishing shape as examples/help-site (help.bunsenbrenner.org).
 #
 # This is an OPTIONAL demo subsystem: bring it up to enable, `down` to take it
@@ -12,13 +12,13 @@
 # Env comes from docker/deploy/.env (see docs/dns01-desec.md).
 services:
   flappy-origin:
-    # Caddy + deSEC plugin: terminates TLS with the LE cert for the hostname and
-    # serves the self-contained Flappy Pipeline Studio page (index.html).
+    # Plain Caddy: terminates TLS with a cert issued CORE-side (#219,
+    # scripts/authorize-pipeline.sh) and mounted read-only below — no ACME
+    # client or deSEC token in this container at all. Serves the self-contained
+    # Flappy Pipeline Studio page (index.html).
     build:
       context: .
       dockerfile: Caddy.Dockerfile
-    environment:
-      - DESEC_TOKEN=${DESEC_TOKEN:?set DESEC_TOKEN in docker/deploy/.env}
     volumes:
       - ./index.html:/srv/index.html:ro
       # #168: the untracked gate.json (SHA-256 hash of the demo password only) that
@@ -27,6 +27,10 @@ services:
       # (run-demo.sh does this for you) or Docker will bind-mount a directory.
       - ./gate.json:/srv/gate.json:ro
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # #219: fullchain.pem + privkey.pem, issued by the operator's
+      # scripts/authorize-pipeline.sh and relayed out of band — never a
+      # DESEC_TOKEN, never an ACME client running in this repo.
+      - ${FLAPPY_CERT_DIR:?set FLAPPY_CERT_DIR=<dir with fullchain.pem+privkey.pem from the operator>}:/certs:ro
       - flappy_caddy_data:/data
     expose:
       - "443"   # reachable only via the tunnel/agent, not published to the host
