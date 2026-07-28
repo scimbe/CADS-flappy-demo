@@ -72,18 +72,29 @@ assert p["pipe"] == "#0f0", ("provided colours must be preserved", p)
   echo "SELFTEST OK (#204 extraction + #210 palette completion)"
   exit 0
 fi
+REQ_ID="$$-$(date -u +%s)-$RANDOM"
+log() { printf '[%s] handler=art req=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REQ_ID" "$*" | tee -a "${CT_HANDLER_LOG_DIR:-/home/becke/workflow-pipelines/.demo-checkouts/handler-logs}/art.log" >&2; }
+
+LLM_TIMEOUT="${CT_HANDLER_TIMEOUT:-45}"
 LLM="${CT_LLM_CMD:-claude}"
 INPUT="$(cat)"
+log "start input_len=${#INPUT}"
+T0=$(date +%s)
 
 SYS="You art-direct a Flappy Bird clone from a free-text prompt. Output ONLY a compact JSON object, no prose, with these keys: theme (one of: day, night, sunset, retro, candy — the closest mood, a fallback), birdColor (a #rrggbb hex), birdEmoji (a single emoji that fits the prompt, or an empty string for a plain tinted bird), title (a short on-topic game title, <= 28 chars), and — IMPORTANT (#176) — a 'palette' object so you can invent a FULL custom colour scheme instead of only picking a preset: palette has exactly skyTop, skyBottom, pipe, pipeEdge, ground, groundEdge, accent, each a #rrggbb hex — ALL SEVEN are REQUIRED, include every one (a missing key breaks the game). Design the palette to match the prompt (e.g. 'cozy autumn forest at dusk' -> warm dusk sky gradient, amber pipes, dark-earth ground). Always include palette. Optionally (#177) also include 'pipeEmoji': a SINGLE emoji used as the obstacle shape when it fits the theme (🌲 forest, 🌵 desert, 🧊 ice, 🏭 industrial), or omit it for classic pipes. Optionally (#178) also include 'bgEffect': an animated background named 'matrix-rain' (falling green glyphs), 'snow', or 'stars' when it fits the prompt (e.g. 'matrix' -> matrix-rain), or omit it for a static sky. Match the prompt's vibe (e.g. 'matrix' -> green #00ff41 bird, 🕶️, dark palette, matrix-rain background, a Matrix-y title). Respond with the JSON object and nothing else."
 
-OUT="$($LLM -p "$INPUT" --output-format text \
+OUT="$(timeout "$LLM_TIMEOUT" "$LLM" -p "$INPUT" --output-format text \
   --disallowedTools "Edit,Write,Bash,WebFetch,WebSearch,Agent" \
-  --append-system-prompt "$SYS" 2>/dev/null)" || OUT=""
+  --append-system-prompt "$SYS" 2>/dev/null)"
+LLM_STATUS=$?
+[ $LLM_STATUS -eq 124 ] && log "warn llm_timeout after=${LLM_TIMEOUT}s"
 
 JSON="$(printf '%s' "$OUT" | extract_json_object | complete_palette)"
+DUR=$(( $(date +%s) - T0 ))
 if printf '%s' "$JSON" | grep -q '"theme"'; then
+  log "done outcome=ok duration=${DUR}s"
   printf '%s\n' "$JSON"
 else
+  log "done outcome=fallback duration=${DUR}s llm_status=${LLM_STATUS}"
   printf '{"theme":"day","birdColor":"#f7d51d","birdEmoji":"","title":"My Flappy Bird"}\n'
 fi

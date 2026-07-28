@@ -81,10 +81,34 @@ function runCmd(cmd, input, timeoutMs = ROLE_CMD_TIMEOUT_MS) {
   });
 }
 
-/** Up to `maxAttempts` tries on failure. */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Up to `maxAttempts` tries on failure, with jittered backoff between them.
+ *
+ * Found via a real live-browser test (not just curl): physics and art dial the edge relay
+ * CONCURRENTLY (both start together, see runCrew below), and each role's serve process only
+ * admits ONE session at a time — a second concurrent dial to the SAME role while the first is
+ * still being served gets rejected at the admission layer ("edge relay refused the channel join",
+ * "channel join admission exchange stalled (#140)", or "early eof"), not queued.
+ *
+ * A short fixed backoff (150-450ms, an earlier version of this fix) only clears a genuinely
+ * momentary relay race — it does NOT help here, because the peer stays busy for the length of a
+ * WHOLE claude -p call (commonly 5-20s), so a contending request exhausts a sub-second retry
+ * budget long before the first request finishes and frees the slot. Confirmed via real concurrent
+ * browser/curl load: 2-4 simultaneous builds hitting the same role reliably failed under the
+ * short-backoff version. Exponential backoff with jitter, capped and given enough total attempts
+ * to plausibly outlast one other concurrent call, is the actual fix.
+ */
 async function runCmdWithRetries(cmd, input, maxAttempts) {
+  const BASE_MS = 500;
+  const CAP_MS = 4000;
   let lastErr = new Error("no attempts made");
   for (let i = 0; i < Math.max(maxAttempts, 1); i++) {
+    if (i > 0) {
+      const delay = Math.min(CAP_MS, BASE_MS * 2 ** (i - 1));
+      await sleep(delay + Math.floor(Math.random() * delay * 0.5));
+    }
     try {
       return await runCmd(cmd, input);
     } catch (e) {
@@ -94,22 +118,23 @@ async function runCmdWithRetries(cmd, input, maxAttempts) {
   throw lastErr;
 }
 
-/** 3 total attempts - the default for a role with no configured standby. */
+/** 5 total attempts (~500ms/1s/2s/4s backoff between them) - the default for a role with no
+ * configured standby; sized to plausibly outlast one other concurrent caller on the same role. */
 function runCmdAsync(cmd, input) {
-  return runCmdWithRetries(cmd, input, 3);
+  return runCmdWithRetries(cmd, input, 5);
 }
 
 /**
  * #207 Slice A - ordered-candidate failover: try candidates in order, first success wins.
  * Non-last candidates get exactly 1 attempt (fail fast, fall through); the LAST candidate gets
- * the full 3 attempts (nowhere further to go, worth paying the retry cost). Returns
+ * the full backoff-retry budget (nowhere further to go, worth paying the retry cost). Returns
  * [output, winningIndex] so the caller can report who actually served the request.
  */
 async function runWithFallbacks(candidates, input) {
   const lastIndex = candidates.length - 1;
   let lastErr = new Error("no role command configured");
   for (let i = 0; i < candidates.length; i++) {
-    const attempts = i === lastIndex ? 3 : 1;
+    const attempts = i === lastIndex ? 5 : 1;
     try {
       const out = await runCmdWithRetries(candidates[i], input, attempts);
       return [out, i];
