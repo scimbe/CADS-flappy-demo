@@ -82,6 +82,16 @@
   footer.support { text-align: center; padding: 22px 14px 30px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 20px; }
   footer.support a { color: var(--muted); text-decoration: none; margin: 0 8px; }
   footer.support a:hover { color: var(--ink); }
+  /* #243: a branded link back to the parent project, reusing bunsenbrenner.org's own
+     brand mark (accent dot + bold serif wordmark + lighter ".org" suffix) so a visitor
+     who lands directly on this demo has a discoverable path back to it. */
+  a.back-brand { display: inline-flex; align-items: center; gap: .55rem; font-family: var(--serif);
+    font-size: 1rem; font-weight: 700; letter-spacing: -.01em; color: var(--ink); text-decoration: none;
+    margin: 0 0 10px; }
+  a.back-brand:hover { color: var(--ink); }
+  a.back-brand .flame { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0;
+    box-shadow: 0 0 0 3px rgba(217,138,79,.22); }
+  a.back-brand .tld { color: var(--muted); font-weight: 400; }
 
   /* mobile-first: single column, game (preview) as the hero on top, controls below */
   .wrap { display: flex; flex-direction: column; gap: 14px; padding: 14px; max-width: 1100px; margin: 0 auto; }
@@ -1131,6 +1141,7 @@ $("genBtn").addEventListener("click", () => {
 });
 </script>
 <footer class="support">
+  <a class="back-brand" href="https://bunsenbrenner.org/"><span class="flame"></span>Bunsenbrenner<span class="tld">.org</span></a><br>
   <a href="https://steady.page/plans/77a32d9c-c399-4ca1-9515-7a628c7a9413" target="_blank" rel="noopener">💙 Support this project →</a>
   <a href="https://buymeacoffee.com/bunsenbrenner" target="_blank" rel="noopener">☕ Buy me a coffee →</a>
 </footer>
