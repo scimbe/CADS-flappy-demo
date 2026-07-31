@@ -6,73 +6,114 @@
 <title>Flappy Pipeline Studio — customize & generate your game</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23f7d51d' stroke='%23c9a80f'/%3E%3C/svg%3E">
 <style>
+  /* ---- palette lifted from bunsenbrenner.org (the core CADS-Tunnel site) so this pipeline
+     demo reads as part of the same family: navy/panel darks, warm amber "flame" accent,
+     teal "live" accent, serif display headings + monospace labels. ---- */
   :root {
-    --bg: #0f1420; --panel: #1a2233; --panel2: #222c40; --ink: #e8edf6;
-    --muted: #93a1bd; --accent: #f7d51d; --accent2: #4ec9b0; --line: #2c3852;
+    --bg: #0c111d; --panel: #141b2c; --panel2: #1a2338; --line: #2a3450; --line-soft: #212a41;
+    --ink: #eef1f7; --muted: #8a93ad; --muted2: #c3c9db;
+    --accent: #d98a4f; --accent-soft: #a8683a; --accent2: #5fb8ab; --bad: #e5654f;
+    --mono: ui-monospace,SFMono-Regular,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --serif: ui-serif,Georgia,"Iowan Old Style","Palatino Linotype",serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f7fb; --panel: #ffffff; --panel2: #eef1f8; --line: #d7deec; --line-soft: #e3e8f3;
+      --ink: #131a2c; --muted: #5b6478; --muted2: #333d54;
+      --accent: #b8672f; --accent-soft: #8f4f24; --accent2: #2f8a7d; --bad: #c94a34;
+    }
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; min-height: 100%; background: var(--bg); color: var(--ink);
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
   a { color: var(--accent2); }
+  h1, h2, h3 { font-family: var(--serif); letter-spacing: -.01em; }
+  code { font-family: var(--mono); }
 
   /* ---- password gate ---- */
   #gate { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(1200px 600px at 50% -10%, #1c2740, #0b0f18); }
+    background: var(--bg);
+    background-image: linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size: 34px 34px; }
   #gate .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
     padding: 32px 28px; width: min(92vw, 380px); text-align: center; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+  #gate .flame-badge { width: 40px; height: 40px; margin: 0 auto 6px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--accent), var(--accent-soft)); display: flex;
+    align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 0 0 6px rgba(217,138,79,.14); }
   #gate h1 { margin: 6px 0 2px; font-size: 22px; }
-  #gate p { color: var(--muted); font-size: 13px; margin: 6px 0 18px; }
+  #gate p { color: var(--muted2); font-size: 13px; margin: 6px 0 18px; }
   #gate input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line);
-    background: #0e1524; color: var(--ink); font-size: 16px; text-align: center; letter-spacing: 2px; }
+    background: var(--bg); color: var(--ink); font-size: 16px; text-align: center; letter-spacing: 2px; font-family: inherit; }
+  #gate input:focus { outline: none; border-color: var(--accent2); }
   #gate button { margin-top: 14px; width: 100%; padding: 12px; border: 0; border-radius: 10px; cursor: pointer;
-    background: var(--accent); color: #1a1400; font-weight: 700; font-size: 15px; }
-  #gateMsg { color: #ff8a8a; font-size: 13px; min-height: 18px; margin-top: 10px; }
+    background: var(--accent); color: #20130a; font-weight: 700; font-size: 15px; transition: filter .15s ease, transform .15s ease; }
+  #gate button:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  #gateMsg { color: var(--bad); font-size: 13px; min-height: 18px; margin-top: 10px; }
 
   /* ---- studio ---- */
   #studio { display: none; }
   header { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--line);
-    position: sticky; top: 0; background: rgba(15,20,32,.92); backdrop-filter: blur(6px); z-index: 10; }
-  header .logo { font-size: 26px; }
-  header h1 { font-size: 18px; margin: 0; }
-  header .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); z-index: 10;
+    background-image: linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size: 34px 34px; }
+  header .brandmark { display: flex; align-items: center; gap: 10px; }
+  header .flame { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 35% 30%, var(--accent), var(--accent-soft));
+    box-shadow: 0 0 0 4px rgba(217,138,79,.16); }
+  header h1 { font-size: 19px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12px; margin-top: 2px; font-family: var(--mono); letter-spacing: .01em; }
   header .spacer { flex: 1; }
+  .live-pill { display: inline-flex; align-items: center; gap: .4rem; font-family: var(--mono); font-size: .68rem;
+    text-transform: uppercase; letter-spacing: .07em; color: var(--accent2); border: 1px solid var(--line);
+    border-radius: 20px; padding: .3rem .65rem .3rem .55rem; margin-right: .4rem; }
+  .live-pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; display: inline-block;
+    font-style: normal; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  @media (prefers-reduced-motion: reduce) { .live-pill i, .crew .ping { animation: none !important; } }
+
   .btn { border: 1px solid var(--line); background: var(--panel2); color: var(--ink); border-radius: 10px;
-    padding: 9px 14px; cursor: pointer; font-size: 14px; font-weight: 600; }
-  .btn.accent { background: var(--accent); color: #1a1400; border-color: transparent; }
+    padding: 9px 14px; cursor: pointer; font-size: 14px; font-weight: 600; transition: filter .15s ease, transform .15s ease, border-color .15s ease; }
+  .btn:hover { border-color: var(--muted); transform: translateY(-1px); }
+  .btn.accent { background: var(--accent); color: #20130a; border-color: transparent; }
+  .btn.accent:hover { filter: brightness(1.08); }
   .btn.info { background: transparent; }
   .btn.secondary { background: transparent; font-weight: 500; font-size: 13px; }
-  footer.support { text-align: center; padding: 18px 14px 26px; color: var(--muted); font-size: 13px; }
+  footer.support { text-align: center; padding: 22px 14px 30px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 20px; }
   footer.support a { color: var(--muted); text-decoration: none; margin: 0 8px; }
   footer.support a:hover { color: var(--ink); }
+
   /* mobile-first: single column, game (preview) as the hero on top, controls below */
   .wrap { display: flex; flex-direction: column; gap: 14px; padding: 14px; max-width: 1100px; margin: 0 auto; }
   .preview { order: -1; }
   @media (min-width: 860px) {
-    /* wider screens: two columns — controls left, game right */
     .wrap { display: grid; grid-template-columns: 320px 1fr; gap: 20px; padding: 20px; align-items: start; }
     .preview { order: 0; }
   }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
-  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
-    margin: 0 0 14px; }
+  .panel h2 { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    margin: 0 0 14px; display: flex; align-items: center; gap: .5rem; }
+  .panel h2::before { content: ""; width: 1.1rem; height: 1px; background: var(--accent2); flex-shrink: 0; }
   .field { margin-bottom: 15px; }
   .field label { display: block; font-size: 13px; margin-bottom: 6px; color: var(--ink); }
-  .field .val { float: right; color: var(--accent2); font-variant-numeric: tabular-nums; }
+  .field .val { float: right; color: var(--accent2); font-variant-numeric: tabular-nums; font-family: var(--mono); }
   input[type=text] { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line);
-    background: #0e1524; color: var(--ink); font-size: 14px; }
+    background: var(--bg); color: var(--ink); font-size: 14px; font-family: inherit; }
+  input[type=text]:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent2); }
   input[type=range] { width: 100%; accent-color: var(--accent); }
   input[type=color] { width: 46px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px;
-    background: #0e1524; vertical-align: middle; }
+    background: var(--bg); vertical-align: middle; }
   select { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line);
-    background: #0e1524; color: var(--ink); font-size: 14px; }
+    background: var(--bg); color: var(--ink); font-size: 14px; font-family: inherit; }
   .emoji-row { display: flex; gap: 6px; flex-wrap: wrap; }
   .emoji-row button { font-size: 20px; width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--line);
-    background: #0e1524; cursor: pointer; }
-  .emoji-row button.sel { border-color: var(--accent); background: #2a2410; }
+    background: var(--bg); cursor: pointer; transition: border-color .15s ease; }
+  .emoji-row button.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
   .preview { display: flex; flex-direction: column; align-items: center; }
   .stage { background: #000; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.5);
-    border: 1px solid var(--line); width: 100%; max-width: 300px; margin: 0 auto; }
-  /* responsive canvas: fills the stage, keeps the 288:512 aspect ratio (mobile-first) */
+    border: 1px solid var(--line); width: 100%; max-width: 300px; margin: 0 auto; position: relative; }
+  .stage::after { content:""; position:absolute; inset:0; pointer-events:none; border-radius: 14px;
+    box-shadow: inset 0 0 0 1px rgba(217,138,79,.08); }
   canvas { display: block; image-rendering: pixelated; touch-action: manipulation; }
   #game { width: 100%; height: auto; aspect-ratio: 288 / 512; }
   .preview .hint { color: var(--muted); font-size: 12px; margin-top: 10px; text-align: center; }
@@ -83,61 +124,77 @@
     background: rgba(4,7,13,.72); padding: 20px; }
   #info .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 26px;
     width: min(96vw, 640px); max-height: 86vh; overflow-y: auto; box-shadow: 0 30px 90px rgba(0,0,0,.6); }
-  #info h2 { margin: 0 0 4px; }
-  #info .lead { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+  #info h2 { margin: 0 0 4px; font-size: 20px; }
+  #info .lead { color: var(--muted2); font-size: 14px; margin-bottom: 18px; }
   .step { display: flex; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
-  .step .n { flex: 0 0 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #1a1400;
-    font-weight: 800; display: flex; align-items: center; justify-content: center; }
-  .step h3 { margin: 2px 0 4px; font-size: 15px; }
-  .step p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
-  .pipe-diagram { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; background: #0e1524;
+  .step .n { flex: 0 0 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #20130a;
+    font-weight: 800; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 13px; }
+  .step h3 { margin: 2px 0 4px; font-size: 15px; font-family: inherit; font-weight: 700; }
+  .step p { margin: 0; color: var(--muted2); font-size: 13px; line-height: 1.5; }
+  .pipe-diagram { font-family: var(--mono); font-size: 12.5px; background: var(--bg);
     border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; color: var(--accent2);
     white-space: pre; margin: 8px 0 18px; }
   #info .close { margin-top: 8px; }
 
   /* ---- prompt panel (mobile-first, full width above the columns) ---- */
   .promptwrap { max-width: 1100px; margin: 0 auto; padding: 14px 14px 0; }
-  .panel.prompt { border-color: #3a4a6a; }
+  .panel.prompt { border-color: var(--accent-soft); position: relative; overflow: hidden; }
+  .panel.prompt::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+    background: radial-gradient(420px 160px at 0% 0%, rgba(217,138,79,.10), transparent 70%); }
   .panel.prompt h2 { color: var(--accent); }
-  .phint { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 0 0 12px; }
+  .panel.prompt h2::before { background: var(--accent); }
+  .phint { color: var(--muted2); font-size: 12.5px; line-height: 1.5; margin: 0 0 12px; }
   .promptrow { display: flex; gap: 10px; flex-wrap: wrap; }
   #prompt { flex: 1 1 240px; min-height: 46px; resize: vertical; padding: 10px 12px; border-radius: 10px;
-    border: 1px solid var(--line); background: #0e1524; color: var(--ink); font-size: 15px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: 15px;
     font-family: inherit; line-height: 1.4; }
   #buildBtn { flex: 0 0 auto; align-self: stretch; }
   .pmsg { font-size: 13px; margin-top: 10px; min-height: 18px; }
   .pmsg.ok { color: var(--accent2); }
-  .pmsg.reject { color: #ff9a8a; }
+  .pmsg.reject { color: var(--bad); }
   @media (min-width: 860px) { #buildBtn { align-self: flex-start; } }
 
   /* ---- build / waiting screen ---- */
   #build { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center;
-    background: radial-gradient(1200px 600px at 50% -10%, #14224a, #070b14 70%); padding: 20px; }
-  #build .buildcard { text-align: center; width: min(94vw, 420px); }
-  #build h2 { font-size: 18px; margin: 18px 0 20px; }
-  .spinner { width: 54px; height: 54px; margin: 0 auto; border-radius: 50%;
-    border: 5px solid rgba(247,213,29,.18); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .crew { display: flex; gap: 10px; justify-content: center; margin-bottom: 18px; }
+    background: var(--bg);
+    background-image: radial-gradient(900px 500px at 50% -10%, rgba(217,138,79,.08), transparent 60%),
+      linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size: auto, 34px 34px, 34px 34px; padding: 20px; }
+  #build .buildcard { text-align: center; width: min(94vw, 460px); }
+  #build h2 { font-size: 18px; margin: 4px 0 18px; }
+
+  /* animated pipeline-flow canvas: device -> crew roles -> your game, an encrypted packet
+     travels the path while the crew works -- same technique bunsenbrenner.org uses for its
+     own network schematic, wired here to the REAL build stage instead of a decorative loop. */
+  .flow-card { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; margin-bottom: 14px; }
+  .flow-head { display: flex; justify-content: space-between; align-items: center; padding: .6rem .85rem;
+    border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: .66rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  canvas#flow { display: block; width: 100%; height: 108px; }
+
+  .crew { display: flex; gap: 10px; justify-content: center; margin-bottom: 14px; }
   .crew .member { flex: 1 1 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 12px 6px; opacity: .4; transition: opacity .3s, border-color .3s, transform .3s; }
+    padding: 12px 6px; opacity: .4; transition: opacity .3s, border-color .3s, transform .3s; position: relative; }
   .crew .member.active { opacity: 1; border-color: var(--accent); transform: translateY(-3px); }
+  .crew .member.active .ping { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
   .crew .member.done { opacity: 1; border-color: var(--accent2); }
   .crew .ico { display: block; font-size: 24px; }
-  .crew .lbl { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; letter-spacing: .04em; }
+  .crew .lbl { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; letter-spacing: .04em; font-family: var(--mono); }
   .crew .tick { display: block; font-size: 12px; color: var(--accent2); height: 14px; }
   .crew .member.done .tick::after { content: "✓"; }
   .crew .member:not(.done) .tick { color: transparent; }
-  .bar { height: 8px; background: #0e1524; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+  .bar { height: 8px; background: var(--bg); border-radius: 6px; overflow: hidden; border: 1px solid var(--line); position: relative; }
   .barfill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2));
-    transition: width .3s ease; }
-  .bstep { color: var(--muted); font-size: 12.5px; margin-top: 12px; min-height: 16px; }
+    background-size: 200% 100%; transition: width .3s ease; animation: shimmer 1.6s linear infinite; }
+  @keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+  @media (prefers-reduced-motion: reduce) { .barfill { animation: none; } }
+  .bstep { color: var(--muted2); font-size: 12.5px; margin-top: 12px; min-height: 16px; font-family: var(--mono); }
   /* auction / LLM-selection feed inside the waiting screen */
-  .auction { margin-top: 16px; text-align: left; background: #0e1524; border: 1px solid var(--line);
+  .auction { margin-top: 16px; text-align: left; background: var(--bg); border: 1px solid var(--line);
     border-radius: 10px; padding: 10px 12px; }
   .ahdr { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
-    margin-bottom: 6px; }
-  #auctionFeed { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.65;
+    margin-bottom: 6px; font-family: var(--mono); }
+  #auctionFeed { font-family: var(--mono); font-size: 11.5px; line-height: 1.65;
     max-height: 132px; overflow-y: auto; }
   .abid { color: var(--muted); }
   .abid .who { color: var(--ink); }
@@ -150,7 +207,7 @@
 <!-- ============ PASSWORD GATE (first layer) ============ -->
 <div id="gate">
   <div class="card">
-    <div style="font-size:34px">🐤</div>
+    <div class="flame-badge">🐤</div>
     <h1>Flappy Pipeline Studio</h1>
     <p>Protected demo. Enter the access password to continue.</p>
     <form id="gateForm">
@@ -164,19 +221,22 @@
 <!-- ============ STUDIO ============ -->
 <div id="studio">
   <header>
-    <div class="logo">🐤</div>
-    <div>
-      <h1>Flappy Pipeline Studio</h1>
-      <div class="sub">Pipeline Service · customize your inputs → generate a standalone product</div>
+    <div class="brandmark">
+      <div class="flame">🐤</div>
+      <div>
+        <h1>Flappy Pipeline Studio</h1>
+        <div class="sub">pipeline service · customize → generate a standalone product</div>
+      </div>
     </div>
     <div class="spacer"></div>
+    <span class="live-pill"><i></i> live crew</span>
     <button class="btn info" id="infoBtn" title="How does this work?">ⓘ Info</button>
   </header>
 
   <!-- prompt-driven build: describe a game in words, the agent crew builds it -->
   <div class="promptwrap">
     <div class="panel prompt">
-      <h2>🤖 Prompt the agent crew</h2>
+      <h2>Prompt the agent crew</h2>
       <p class="phint">Describe the game you want and the crew (🕹️ physics · 🎨 art · 🧩 integration) builds it.
         Keep prompting to refine, or download anytime. A prompt that tries to subvert the system instead of
         describing a game is rejected — and your current game is kept.</p>
@@ -303,7 +363,7 @@
       <p>The product isn't made by one monolith — it's assembled by a <b>crew of specialized LLM agents</b>, each
         owning a role, coordinating over the zero-knowledge tunnel. That's the same role-chain that built the
         original game by hand:</p>
-      <ul style="margin:8px 0 0; padding-left:18px; color:var(--muted); font-size:13px; line-height:1.6">
+      <ul style="margin:8px 0 0; padding-left:18px; color:var(--muted2); font-size:13px; line-height:1.6">
         <li><b>🕹️ Physics</b> — gravity, flap power, pipe gap &amp; speed (fair, tunable difficulty)</li>
         <li><b>🎨 Art</b> — palette, bird, theme, the game's look</li>
         <li><b>🧩 Integration</b> — assembles the parts into one self-contained product</li>
@@ -331,12 +391,19 @@
 <!-- ============ BUILD / WAITING SCREEN ============ -->
 <div id="build">
   <div class="buildcard">
-    <div class="spinner" aria-hidden="true"></div>
     <h2 id="buildTitle">The agent crew is building your game…</h2>
+
+    <!-- animated pipeline-flow diagram: real build stage drives which node is "hot" and where
+         the traveling packet glows. Purely visual; respects reduced-motion. -->
+    <div class="flow-card">
+      <div class="flow-head"><span>agent-fabric channel · live</span><span id="flowCaption">connecting…</span></div>
+      <canvas id="flow"></canvas>
+    </div>
+
     <div class="crew">
-      <div class="member" data-role="physics"><span class="ico">🕹️</span><span class="lbl">physics</span><span class="tick">•</span></div>
-      <div class="member" data-role="art"><span class="ico">🎨</span><span class="lbl">art</span><span class="tick">•</span></div>
-      <div class="member" data-role="integration"><span class="ico">🧩</span><span class="lbl">integration</span><span class="tick">•</span></div>
+      <div class="member" data-role="physics"><span class="ping"></span><span class="ico">🕹️</span><span class="lbl">physics</span><span class="tick">•</span></div>
+      <div class="member" data-role="art"><span class="ping"></span><span class="ico">🎨</span><span class="lbl">art</span><span class="tick">•</span></div>
+      <div class="member" data-role="integration"><span class="ping"></span><span class="ico">🧩</span><span class="lbl">integration</span><span class="tick">•</span></div>
     </div>
     <div class="bar"><div id="buildBar" class="barfill"></div></div>
     <div id="buildStep" class="bstep">…</div>
@@ -646,6 +713,81 @@ function refresh() { syncLabels(); clearTimeout(refreshTimer); refreshTimer = se
 $("preset").addEventListener("change", () => { applyPreset(); refresh(); });
 $("playBtn").addEventListener("click", startPreview);
 
+/* ============================================================================
+ * Animated pipeline-flow diagram (decorative, but state-driven): device -> the
+ * live crew roles -> your browser, a glowing packet travels the active segment.
+ * Same canvas technique bunsenbrenner.org uses for its own network schematic,
+ * here wired to setFlowStage() calls from the real build event handler below
+ * instead of a purely decorative loop. Respects reduced-motion (freezes on the
+ * current segment's midpoint instead of animating).
+ * ==========================================================================*/
+const FLOW_LABELS = ["You", "🛡️ Safety", "🕹️ Physics", "🎨 Art", "🧩 Integration", "Game"];
+const flowReduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+let flowStage = 0;      // index into FLOW_LABELS marking the active/most-advanced node
+let flowActive = false; // whether the packet should be animating at all right now
+(function initFlow() {
+  const c = $("flow");
+  if (!c) return;
+  const ctx = c.getContext("2d");
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function resize() {
+    const r = c.getBoundingClientRect();
+    c.width = r.width * devicePixelRatio; c.height = r.height * devicePixelRatio;
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+  let t = 0, lastW = 0, lastH = 0;
+  function draw() {
+    // #build is display:none at init, so the very first resize() saw a 0x0 rect -- the canvas
+    // stayed 0x0 forever after that (a window "resize" event never fires just from showing an
+    // overlay). Re-check every frame and only touch c.width/height (which clears the canvas) when
+    // the measured size actually changed, so the canvas is correctly sized the moment it becomes
+    // visible without wastefully resetting a canvas that hasn't changed size.
+    const rect = c.getBoundingClientRect();
+    if (rect.width !== lastW || rect.height !== lastH) { lastW = rect.width; lastH = rect.height; resize(); }
+    const r = rect, w = r.width, h = r.height;
+    ctx.clearRect(0, 0, w, h);
+    const line = cssVar("--line"), muted = cssVar("--muted"), ink = cssVar("--ink"),
+      accent = cssVar("--accent"), accent2 = cssVar("--accent2");
+    const n = FLOW_LABELS.length, pad = 34;
+    const xs = []; for (let i = 0; i < n; i++) xs.push(pad + (w - 2 * pad) * (i / (n - 1)));
+    const y = h / 2 - 6;
+    ctx.strokeStyle = line; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(xs[0], y); ctx.lineTo(xs[n - 1], y); ctx.stroke();
+    // completed segment glows in accent2 to show real progress, not just decoration
+    if (flowStage > 0) {
+      ctx.strokeStyle = accent2; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(xs[0], y); ctx.lineTo(xs[Math.min(flowStage, n - 1)], y); ctx.stroke();
+    }
+    for (let i = 0; i < n; i++) {
+      const hot = i === flowStage;
+      ctx.beginPath(); ctx.arc(xs[i], y, hot ? 6 : 5, 0, Math.PI * 2);
+      ctx.fillStyle = cssVar("--panel"); ctx.fill();
+      ctx.lineWidth = hot ? 2.5 : 2;
+      ctx.strokeStyle = i <= flowStage ? accent2 : line;
+      ctx.stroke();
+      ctx.font = "9.5px " + (cssVar("--mono") || "monospace");
+      ctx.fillStyle = i <= flowStage ? ink : muted; ctx.textAlign = "center";
+      ctx.fillText(FLOW_LABELS[i], xs[i], y + 20);
+    }
+    if (flowActive && n > 1) {
+      const segFrom = Math.max(0, Math.min(flowStage, n - 2));
+      const pos = flowReduce ? 0.5 : (Math.sin(t / 26) + 1) / 2;
+      const px = xs[segFrom] + (xs[segFrom + 1] - xs[segFrom]) * pos;
+      ctx.beginPath(); ctx.arc(px, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = accent; ctx.shadowColor = accent; ctx.shadowBlur = 9; ctx.fill(); ctx.shadowBlur = 0;
+    }
+    t += 1;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+function setFlowStage(i, active, caption) {
+  flowStage = i; flowActive = !!active;
+  if (caption && $("flowCaption")) $("flowCaption").textContent = caption;
+}
+
 // ---- prompt → agent-crew build ---------------------------------------------------
 // A prompt is SAFETY-GUARDED first: it must read as a game customization, not an
 // "anti-prompt" trying to subvert the system. Accepted prompts run through the crew
@@ -756,20 +898,23 @@ async function renderAuction(role, icon, bids) {
 // AFTER the animation (the live path applies the crew's real config there).
 async function runBuild(bidsByRole, applyThen) {
   const members = [...document.querySelectorAll(".crew .member")];
-  const steps = [["physics", 34, "🕹️"], ["art", 70, "🎨"], ["integration", 100, "🧩"]];
+  const steps = [["physics", 34, "🕹️", 2], ["art", 70, "🎨", 3], ["integration", 100, "🧩", 4]];
   $("build").style.display = "flex";
   $("buildBar").style.width = "0%";
   $("auctionFeed").innerHTML = "";
   members.forEach((m) => m.classList.remove("active", "done"));
-  for (const [role, pct, icon] of steps) {
+  setFlowStage(1, true, "safety checked (offline)");
+  for (const [role, pct, icon, flowIdx] of steps) {
     const el = members.find((m) => m.dataset.role === role);
     el.classList.add("active");
+    setFlowStage(flowIdx, true, role + " producing…");
     const w = await renderAuction(role, icon, bidsByRole && bidsByRole[role]);
     $("buildStep").textContent = icon + " " + w.who + " (" + w.model + ") is producing the " + role + " part…";
     await sleep(480);
     $("buildBar").style.width = pct + "%";
     el.classList.remove("active"); el.classList.add("done");
   }
+  setFlowStage(FLOW_LABELS.length - 1, false, "delivered");
   if (applyThen) applyThen();
   startPreview();
   await sleep(320);
@@ -863,6 +1008,7 @@ $("buildBtn").addEventListener("click", async () => {
   $("buildStep").textContent = "🛰 Reaching the agent crew over the tunnel…";
   document.querySelectorAll(".crew .member").forEach((m) => m.classList.remove("active", "done"));
   $("build").style.display = "flex";
+  setFlowStage(0, true, "dialing the tunnel…");
   const hideBuild = () => { $("build").style.display = "none"; };
   try {
     // 1) LIVE path — the real crew over the tunnel (#169/#171/#173 A), driven LIVE by the streamed
@@ -873,21 +1019,25 @@ $("buildBtn").addEventListener("click", async () => {
       if (ev.stage === "safety" && ev.status === "start") {
         $("buildStep").textContent = "🛡️ safety agent reviewing your prompt over the tunnel…";
         feedLine("abid", "🛡️ <b>safety</b> — reviewing the prompt");
+        setFlowStage(1, true, "safety reviewing…");
       } else if (ev.stage === "safety" && ev.status === "ok") {
         feedLine("awin", "&nbsp;&nbsp;✓ safety cleared");
       } else if (ev.stage === "physics" && ev.status === "start") {
         const m = member("physics"); if (m) m.classList.add("active");
         $("buildStep").textContent = "🕹️ source-2 is producing the physics…";
         feedLine("abid", "🕹️ <b>physics</b> — source-2 building over the tunnel");
+        setFlowStage(2, true, "physics building…");
       } else if (ev.stage === "art" && ev.status === "start") {
         const m = member("art"); if (m) m.classList.add("active");
         feedLine("abid", "🎨 <b>art</b> — sink building over the tunnel");
+        setFlowStage(3, true, "art building…");
       } else if (ev.stage === "physics" && ev.status === "done") {
         const m = member("physics"); if (m) { m.classList.remove("active"); m.classList.add("done"); }
         $("buildBar").style.width = "55%"; feedLine("awin", "&nbsp;&nbsp;✓ physics done");
       } else if (ev.stage === "art" && ev.status === "done") {
         const m = member("art"); if (m) { m.classList.remove("active"); m.classList.add("done"); }
         $("buildBar").style.width = "80%"; feedLine("awin", "&nbsp;&nbsp;✓ art done");
+        setFlowStage(4, true, "integration assembling…");
       }
     };
     let term = null;
@@ -900,6 +1050,7 @@ $("buildBtn").addEventListener("click", async () => {
         if (w) feedLine("awin", "&nbsp;&nbsp;✓ " + a.role + " cleared → <span class='who'>" + w.who + "</span> · " + w.model);
       });
       $("buildBar").style.width = "100%";
+      setFlowStage(FLOW_LABELS.length - 1, false, "delivered ✓");
       applyLiveConfig(term.config);
       startPreview();
       await sleep(500);
