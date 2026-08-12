@@ -67,6 +67,9 @@
   .live-pill { display: inline-flex; align-items: center; gap: .4rem; font-family: var(--mono); font-size: .68rem;
     text-transform: uppercase; letter-spacing: .07em; color: var(--accent2); border: 1px solid var(--line);
     border-radius: 20px; padding: .3rem .65rem .3rem .55rem; margin-right: .4rem; }
+  /* author display:inline-flex above otherwise beats the UA stylesheet's [hidden] rule --
+     see CADS-webconference-demo#86 for the live-reported version of this exact bug class. */
+  .live-pill[hidden] { display: none; }
   .live-pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; display: inline-block;
     font-style: normal; animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
@@ -239,6 +242,7 @@
       </div>
     </div>
     <div class="spacer"></div>
+    <span class="live-pill" id="promptCounterPill" title="Games built by everyone, across all visitors" hidden>🎮 <span id="promptCountVal">–</span> games built</span>
     <span class="live-pill"><i></i> live crew</span>
     <button class="btn info" id="infoBtn" title="How does this work?">ⓘ Info</button>
   </header>
@@ -939,6 +943,18 @@ async function runBuild(bidsByRole, applyThen) {
 let CREW_URL = "crew/build";
 fetch("crew.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null))
   .then((j) => { if (j && j.url) CREW_URL = j.url; }).catch(() => {});
+
+// Global "prompts built" counter (GET /crew/count) — a real, persistent count of successful
+// builds across every visitor, not per-browser. Stays hidden until the first fetch actually
+// succeeds (no live crew → no meaningful number to show, same "fail quiet, don't show 0" shape
+// as the rest of this page's live-crew-only features).
+function setPromptCountDisplay(n) {
+  if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return;
+  $("promptCountVal").textContent = n.toLocaleString();
+  $("promptCounterPill").hidden = false;
+}
+fetch("crew/count", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null))
+  .then((j) => { if (j && typeof j.count === "number") setPromptCountDisplay(j.count); }).catch(() => {});
 // STREAMING (#173 A): /crew/build streams newline-delimited JSON events as the crew runs — safety
 // start/ok → physics/art start → physics/art done → a terminal built|rejected|error — so the browser
 // shows the real role-chain live instead of one opaque ~28s wait. `onEvent` is called per event;
@@ -1055,6 +1071,13 @@ $("buildBtn").addEventListener("click", async () => {
     if (term && term.stage === "built") {
       const mi = member("integration"); if (mi) mi.classList.add("done");
       $("buildStep").textContent = "🧩 integration — assembling your game…";
+      // Optimistic +1: the bridge already incremented its own persisted count the moment it
+      // emitted this same "built" event (server.lib.js), so reflecting that here immediately is
+      // accurate, not a guess — no need to wait on a fresh GET /crew/count round-trip.
+      if ($("promptCounterPill").hidden === false || $("promptCountVal").textContent !== "–") {
+        const cur = Number(($("promptCountVal").textContent || "0").replace(/,/g, ""));
+        if (Number.isFinite(cur)) setPromptCountDisplay(cur + 1);
+      }
       (term.auction || []).forEach((a) => {
         const w = (a.bids || []).find((b) => b.win) || (a.bids || [])[0];
         if (w) feedLine("awin", "&nbsp;&nbsp;✓ " + a.role + " cleared → <span class='who'>" + w.who + "</span> · " + w.model);

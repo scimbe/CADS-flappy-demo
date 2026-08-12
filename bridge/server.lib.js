@@ -23,7 +23,9 @@
  *   CREW_PHYSICS_CMD   - stdin=prompt -> stdout {gravity,flapPower,pipeGap,pipeSpeed}
  *   CREW_PHYSICS_CMD_2, _3, ... - ordered failover candidates (#207 Slice A), contiguous from _2
  *   CREW_ART_CMD       - stdin=prompt -> stdout {theme,birdColor,birdEmoji,title,palette?,pipeEmoji?,bgEffect?}
+ *   CREW_ART_CMD_2, _3, ... - ordered failover candidates (#207 Slice A), contiguous from _2, same as physics
  *   CREW_BRIDGE_LISTEN - default 0.0.0.0:8788
+ *   CREW_PROMPT_COUNT_FILE - default ./prompt-count.json; global counter of successful builds (GET /crew/count)
  *
  * Fail-closed: safety runs first and {ok:false} short-circuits to a rejection (no fragment
  * calls); a role command failing/malformed output -> a terminal {stage:"error"} event, so the
@@ -31,6 +33,42 @@
  */
 
 const { spawn } = require("child_process");
+const fs = require("fs");
+
+// Global "prompts built" counter shown on the studio's main page. Counts successful builds only
+// (a stage:"built" terminal event) -- rejected/errored attempts don't produce a game, so counting
+// them would overstate what the crew actually created. Same atomic-write-then-rename pattern as
+// CADS-webconference-demo's access-requests.json (bridge/server.js there): the in-memory value is
+// the runtime source of truth, the file is only a load-on-boot / write-through backup so a bridge
+// restart doesn't reset the count to zero.
+const PROMPT_COUNT_FILE = process.env.CREW_PROMPT_COUNT_FILE || "./prompt-count.json";
+let promptCount = 0;
+try {
+  const raw = fs.readFileSync(PROMPT_COUNT_FILE, "utf8");
+  const parsed = JSON.parse(raw);
+  if (typeof parsed.count === "number" && Number.isFinite(parsed.count) && parsed.count >= 0) {
+    promptCount = Math.floor(parsed.count);
+  }
+  process.stderr.write(`flappy-crew-bridge: loaded prompt count ${promptCount} from ${PROMPT_COUNT_FILE}\n`);
+} catch (e) {
+  if (e.code !== "ENOENT") {
+    process.stderr.write(`flappy-crew-bridge: could not load ${PROMPT_COUNT_FILE}: ${e.message} -- starting count at 0\n`);
+  }
+}
+function incrementPromptCount() {
+  promptCount += 1;
+  const tmp = `${PROMPT_COUNT_FILE}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ count: promptCount }));
+    fs.renameSync(tmp, PROMPT_COUNT_FILE);
+  } catch (e) {
+    process.stderr.write(`flappy-crew-bridge: could not persist prompt count to ${PROMPT_COUNT_FILE}: ${e.message}\n`);
+  }
+  return promptCount;
+}
+function getPromptCount() {
+  return promptCount;
+}
 
 const ROLE_CMD_TIMEOUT_MS = 60_000;
 
@@ -166,10 +204,10 @@ function candidateLabel(primary, standby, winningIndex) {
 }
 
 /** The visible auction for the demo crew (mirrors ct_common::crew's demo_auction). */
-function demoAuction(physicsWho) {
+function demoAuction(physicsWho, artWho) {
   return [
     { role: "physics", bids: [{ who: physicsWho, model: "claude", units: 20, price: 50, win: true }] },
-    { role: "art", bids: [{ who: "sink", model: "claude", units: 20, price: 40, win: true }] },
+    { role: "art", bids: [{ who: artWho, model: "claude", units: 20, price: 40, win: true }] },
   ];
 }
 
@@ -203,13 +241,25 @@ function assembleConfig(physicsJson, artJson) {
   return cfg;
 }
 
-/** Write one NDJSON event to the response stream. */
+/** Write one NDJSON event to the response stream. Returns false if the client is already gone
+ * (disconnected/backgrounded mid-build) instead of throwing — callers should stop driving the
+ * pipeline forward in that case rather than paying for further LLM calls nobody will read. */
 function emit(res, ev) {
-  res.write(JSON.stringify(ev) + "\n");
+  if (res.destroyed || res.writableEnded) {
+    process.stderr.write(`flappy-crew-bridge: client gone, dropping stage=${ev.stage}\n`);
+    return false;
+  }
+  try {
+    res.write(JSON.stringify(ev) + "\n");
+    return true;
+  } catch (e) {
+    process.stderr.write(`flappy-crew-bridge: write failed (client gone?) at stage=${ev.stage}: ${e.message}\n`);
+    return false;
+  }
 }
 
 /** Drive the crew safety -> (physics || art) -> assemble, streaming one event per step. */
-async function runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmd, res) {
+async function runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmds, res) {
   emit(res, { stage: "safety", status: "start" });
   let safetyOut;
   try {
@@ -227,14 +277,16 @@ async function runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmd, res) {
     const reason = typeof verdict.reason === "string" ? verdict.reason : "rejected by the safety agent";
     return emit(res, { stage: "rejected", safety: { ok: false, reason } });
   }
-  emit(res, { stage: "safety", status: "ok" });
+  // If the client is already gone (backgrounded tab, dropped network, etc.), stop here rather
+  // than paying for the physics + art LLM calls nobody will read.
+  if (!emit(res, { stage: "safety", status: "ok" })) return;
 
   emit(res, { stage: "physics", status: "start" });
   emit(res, { stage: "art", status: "start" });
   const physicsP = runWithFallbacks(physicsCmds, prompt).then(
     (r) => { emit(res, { stage: "physics", status: "done" }); return r; }
   );
-  const artP = runCmdAsync(artCmd, prompt).then(
+  const artP = runWithFallbacks(artCmds, prompt).then(
     (r) => { emit(res, { stage: "art", status: "done" }); return r; }
   );
   const [physicsResult, artResult] = await Promise.allSettled([physicsP, artP]);
@@ -246,7 +298,7 @@ async function runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmd, res) {
     return emit(res, { stage: "error", message: `art role unreachable: ${artResult.reason.message}` });
   }
   const [physicsOut, physicsWinner] = physicsResult.value;
-  const artOut = artResult.value;
+  const [artOut, artWinner] = artResult.value;
 
   let cfg;
   try {
@@ -256,10 +308,12 @@ async function runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmd, res) {
   }
 
   const physicsWho = candidateLabel("source-2", "central (standby)", physicsWinner);
+  const artWho = candidateLabel("sink", "central (standby)", artWinner);
+  incrementPromptCount();
   emit(res, {
     stage: "built",
     safety: { ok: true, reason: "" },
-    auction: demoAuction(physicsWho),
+    auction: demoAuction(physicsWho, artWho),
     config: cfg,
   });
 }
@@ -300,13 +354,14 @@ async function buildHandler(req, res) {
     return res.end("crew role commands not configured");
   }
   const physicsCmds = roleCandidates("CREW_PHYSICS_CMD", physicsCmd);
+  const artCmds = roleCandidates("CREW_ART_CMD", artCmd);
 
   res.writeHead(200, {
     "content-type": "application/x-ndjson",
     "cache-control": "no-store",
   });
   try {
-    await runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmd, res);
+    await runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmds, res);
   } catch (e) {
     // Defensive: runCrewStreaming should never throw (every branch returns after emit()), but
     // don't let an unexpected bug hang the response open.
@@ -328,6 +383,11 @@ function requestListener(req, res) {
     });
     return;
   }
+  if (req.method === "GET" && req.url === "/crew/count") {
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ count: promptCount }));
+    return;
+  }
   res.writeHead(404, { "content-type": "text/plain" });
   res.end("not found");
 }
@@ -344,4 +404,6 @@ module.exports = {
   runCrewStreaming,
   buildHandler,
   requestListener,
+  incrementPromptCount,
+  getPromptCount,
 };

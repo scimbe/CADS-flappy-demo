@@ -39,12 +39,15 @@ services:
     restart: unless-stopped
 
   flappy-agent:
-    # The workspace ct-agent image, in Browser-Plane mode (SNI passthrough).
+    # Browser-Plane mode (SNI passthrough) -- built from the standalone
+    # scimbe/ct-agent repo via Agent.Dockerfile, not from a sibling
+    # CADS-Tunnel checkout (that stopped working once ct-agent's source was
+    # extracted out of CADS-Tunnel core; see Agent.Dockerfile's own comment).
     build:
-      context: ${CT_TUNNEL_SRC:-../CADS-Tunnel}
-      dockerfile: docker/Dockerfile
+      context: .
+      dockerfile: Agent.Dockerfile
       args:
-        - CRATE=ct-agent
+        - CT_AGENT_REF=${CT_AGENT_REF:-eb4de4d2427ce51e301c0bf31582cce4bbaa097c}
     environment:
       - CT_AGENT_MODE=browser
       - CT_AGENT_HOSTNAME=flappy-demo.bunsenbrenner.org
@@ -115,6 +118,9 @@ services:
       - CREW_PHYSICS_NOISE_KEY=${CREW_PHYSICS_NOISE_KEY:-}
       - CREW_ART_GRANT=${CREW_ART_GRANT:-}
       - CREW_ART_HOLDER_KEY=${CREW_ART_HOLDER_KEY:-}
+      # #207: central-served standby (candidate 2) for when sink's art serve is down, same
+      # pattern as CREW_PHYSICS_STANDBY_GRANT above.
+      - CREW_ART_STANDBY_GRANT=${CREW_ART_STANDBY_GRANT:-}
       - CREW_ART_NOISE_KEY=${CREW_ART_NOISE_KEY:-}
       - CREW_SAFETY_GRANT=${CREW_SAFETY_GRANT:-}
       - CREW_SAFETY_HOLDER_KEY=${CREW_SAFETY_HOLDER_KEY:-}
@@ -124,7 +130,16 @@ services:
       # #207 Slice A: candidate 2 — central's standby, tried only if source-2 (candidate 1) fails.
       - "CREW_PHYSICS_CMD_2=env CT_CHANNEL_ROLE=initiate CT_CHANNEL_CALL_SERVICE=text_generation CT_CHANNEL_BROKER=$$CREW_EDGE_BROKER CT_CHANNEL_RELAY=$$CREW_EDGE_RELAY CT_CHANNEL_LISTEN=0.0.0.0:0 CT_CHANNEL_GRANT=$$CREW_PHYSICS_STANDBY_GRANT CT_CHANNEL_HOLDER_KEY=$$CREW_PHYSICS_HOLDER_KEY CT_CHANNEL_NOISE_KEY=$$CREW_PHYSICS_NOISE_KEY ct-agent channel"
       - "CREW_ART_CMD=env CT_CHANNEL_ROLE=initiate CT_CHANNEL_CALL_SERVICE=text_generation CT_CHANNEL_BROKER=$$CREW_EDGE_BROKER CT_CHANNEL_RELAY=$$CREW_EDGE_RELAY CT_CHANNEL_LISTEN=0.0.0.0:0 CT_CHANNEL_GRANT=$$CREW_ART_GRANT CT_CHANNEL_HOLDER_KEY=$$CREW_ART_HOLDER_KEY CT_CHANNEL_NOISE_KEY=$$CREW_ART_NOISE_KEY ct-agent channel"
+      # #207 Slice A: candidate 2 — central's standby, tried only if sink (candidate 1) fails.
+      - "CREW_ART_CMD_2=env CT_CHANNEL_ROLE=initiate CT_CHANNEL_CALL_SERVICE=text_generation CT_CHANNEL_BROKER=$$CREW_EDGE_BROKER CT_CHANNEL_RELAY=$$CREW_EDGE_RELAY CT_CHANNEL_LISTEN=0.0.0.0:0 CT_CHANNEL_GRANT=$$CREW_ART_STANDBY_GRANT CT_CHANNEL_HOLDER_KEY=$$CREW_ART_HOLDER_KEY CT_CHANNEL_NOISE_KEY=$$CREW_ART_NOISE_KEY ct-agent channel"
       - "CREW_SAFETY_CMD=env CT_CHANNEL_ROLE=initiate CT_CHANNEL_CALL_SERVICE=safety_check CT_CHANNEL_BROKER=$$CREW_EDGE_BROKER CT_CHANNEL_RELAY=$$CREW_EDGE_RELAY CT_CHANNEL_LISTEN=0.0.0.0:0 CT_CHANNEL_GRANT=$$CREW_SAFETY_GRANT CT_CHANNEL_HOLDER_KEY=$$CREW_SAFETY_HOLDER_KEY CT_CHANNEL_NOISE_KEY=$$CREW_SAFETY_NOISE_KEY ct-agent channel"
+      # Global "prompts built" counter shown on the studio's main page (GET /crew/count) --
+      # needs a real writable volume since /srv itself is the image's own COPY'd code, not
+      # persistent storage worth keeping (same reasoning as CADS-webconference-demo's
+      # access-requests volume).
+      - CREW_PROMPT_COUNT_FILE=/srv/data/prompt-count.json
+    volumes:
+      - flappy_crew_state:/srv/data
     expose:
       - "8788"   # reached only by the origin's reverse_proxy on the compose network
     depends_on:
@@ -134,6 +149,7 @@ services:
 volumes:
   flappy_caddy_data:
   flappy_agent_state:
+  flappy_crew_state:
 
 # This stack's own private network — sufficient when onboarding against a
 # remote/hosted control-plane (e.g. bunsenbrenner.org): the agent only needs

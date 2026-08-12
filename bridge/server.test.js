@@ -132,6 +132,7 @@ async function collect(safety, physicsCmds, art) {
   const fakeRes = {
     write(s) { chunks.push(s); return true; },
   };
-  await mod.runCrewStreaming("test prompt", safety, physicsCmds, art, fakeRes);
+  const artCmds = Array.isArray(art) ? art : [art];
+  await mod.runCrewStreaming("test prompt", safety, physicsCmds, artCmds, fakeRes);
   return chunks.join("").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 }
