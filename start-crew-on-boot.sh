@@ -25,6 +25,28 @@ for i in $(seq 1 30); do
 done
 docker info >/dev/null 2>&1 || { log "docker never became ready -- giving up"; exit 1; }
 
+# #207-follow-up: CREW_ART_STANDBY_GRANT/CREW_PHYSICS_STANDBY_GRANT were once silently
+# duplicated from their own primary CREW_*_GRANT (a copy-paste provisioning mistake, not
+# a real distinct channel) -- the standby candidate then dialed the SAME channel as
+# primary instead of a genuine fallback, defeating #207's whole failover design without
+# any visible error (both candidates "succeeded", just at the same peer). Caught live
+# 2026-08-13 by re-deriving and comparing every *_GRANT/*_STANDBY_GRANT pair below;
+# fixed by re-provisioning genuinely distinct channels. This check makes that mistake
+# loud and immediate on every boot/restart instead of silently shipping again.
+log "verifying no CREW_*_GRANT duplicates its own CREW_*_STANDBY_GRANT (#207 follow-up)"
+DUP_FOUND=0
+for primary_var in $(grep -oE '^CREW_[A-Z]+_GRANT=' .env | sed 's/=$//'); do
+  role="${primary_var#CREW_}"; role="${role%_GRANT}"
+  standby_var="CREW_${role}_STANDBY_GRANT"
+  primary_val="$(grep "^${primary_var}=" .env | cut -d= -f2-)"
+  standby_val="$(grep "^${standby_var}=" .env | cut -d= -f2-)"
+  if [ -n "$standby_val" ] && [ "$primary_val" = "$standby_val" ]; then
+    log "FATAL: ${primary_var} and ${standby_var} are IDENTICAL -- the standby candidate is not a distinct channel, #207 failover is silently broken for this role"
+    DUP_FOUND=1
+  fi
+done
+[ "$DUP_FOUND" -eq 0 ] || { log "aborting -- fix .env before bringing the crew up (re-provision the affected STANDBY_GRANT via provision-link-channel.sh)"; exit 1; }
+
 log "recreating flappy-crew-bridge (uses .env, --no-deps so flappy-origin/-agent are never touched)"
 docker compose --profile crew -f compose.flappy-demo.yml up -d --no-deps --force-recreate flappy-crew-bridge
 
