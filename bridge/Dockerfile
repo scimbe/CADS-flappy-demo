@@ -23,13 +23,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 # Which ct-agent commit to build -- bump deliberately, matching CADS-webconference-demo's own
-# Agent.Dockerfile pin convention. Bumped 2026-08-13 (v0.4.7): confirms and targets this repo's
-# own root cause -- a channel session admitted over QUIC dies at the edge's 10s idle timeout the
-# moment an in-flight LLM call goes quiet on the wire (the ~14-15s "healthy then drops, even
-# mid-traffic" signature live-diagnosed here, see CADS-Tunnel#494). Adds CT_CHANNEL_FRONT_DOOR_ONLY
-# to pin channel sessions onto the :443 TLS-TCP front door instead. Also fixes ct-agent#16 (this
-# repo's own filed regression). Keep in sync with Agent.Dockerfile's own CT_AGENT_REF.
-ARG CT_AGENT_REF=9dcc455c4a050a5e7d24b766a41e0d7e04428086
+# Agent.Dockerfile pin convention. Bumped 2026-08-13 (v0.4.8): THE actual root cause of
+# CADS-Tunnel#494, pinned by the operator via live edge logs -- the edge parks a lone first
+# pairing member for a 30s TTL, but the client's own ADMISSION_EXCHANGE_TIMEOUT was only 15s, so
+# any pairing whose second side took 15-30s to arrive failed deterministically. v0.4.8 raises it
+# to 45s. Keep in sync with Agent.Dockerfile's own CT_AGENT_REF.
+ARG CT_AGENT_REF=3823343fdc47ea4ed91819cb68bfa8e89399f3f8
 RUN git clone https://github.com/scimbe/ct-agent.git /build && cd /build && git checkout "${CT_AGENT_REF}"
 WORKDIR /build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

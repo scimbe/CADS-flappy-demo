@@ -18,18 +18,20 @@ FROM rust:1-slim-bookworm AS builder
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-# Bumped 2026-08-13 (v0.4.7): v0.4.7's own changelog directly confirms this
-# demo's root cause -- "a session admitted over QUIC dies with the next flap
-# at the edge's 10s idle timeout (the observed ~14-15s 'healthy then drops,
-# even mid-traffic' signature -- an in-flight LLM call sends no QUIC
-# packets)" -- exactly the ~14-15s window this repo's role-serve containers
-# were live-diagnosed hitting (see CADS-Tunnel#494). v0.4.7 adds
-# CT_CHANNEL_FRONT_DOOR_ONLY to pin channel sessions onto the :443 TLS-TCP
-# front door instead of flaky QUIC, plus fixes ct-agent#16 (this repo's own
-# filed regression: agent registration only fell back to TCP on the FIRST
-# dial, so a mid-life UDP flap took the whole demo down for the flap's
-# duration). Keep in sync with bridge/Dockerfile's own CT_AGENT_REF.
-ARG CT_AGENT_REF=9dcc455c4a050a5e7d24b766a41e0d7e04428086
+# Bumped 2026-08-13 (v0.4.8): THE actual root cause of this demo's
+# admission-stall (CADS-Tunnel#494), pinned by the operator via live edge
+# logs -- the edge parks a lone first pairing member for a 30s TTL waiting
+# for its partner, but the CLIENT's own ADMISSION_EXCHANGE_TIMEOUT was only
+# 15s. Any pairing whose second side took 15-30s to arrive (normal when
+# that side walks its own dial ladder first) failed deterministically on
+# the first side -- explains the measured ~14-15s window exactly, the
+# intermittency (only pairings arriving within 15s of each other
+# succeeded), and why it reproduced identically on both QUIC and the v0.4.7
+# TCP front-door pin (a client timeout constant, not transport-specific).
+# v0.4.8 raises it to 45s (server park window + ladder-walk margin).
+# Supersedes the v0.4.7 CT_CHANNEL_FRONT_DOOR_ONLY workaround entirely.
+# Keep in sync with bridge/Dockerfile's own CT_AGENT_REF.
+ARG CT_AGENT_REF=3823343fdc47ea4ed91819cb68bfa8e89399f3f8
 RUN git clone https://github.com/scimbe/ct-agent.git /build && cd /build && git checkout "${CT_AGENT_REF}"
 WORKDIR /build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
