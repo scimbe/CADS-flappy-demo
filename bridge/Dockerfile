@@ -23,15 +23,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 # Which ct-agent commit to build -- bump deliberately, matching CADS-webconference-demo's own
-# Agent.Dockerfile pin convention. Bumped 2026-08-12 (live-diagnosed): the previous pin
-# (86ab198f) predated ct-agent#15's TCP-fallback keepalive/ping-role fix (a parked connection
-# generating no real payload traffic got treated as idle and dropped by some firewall/DPI
-# gateways -- observed live here as intermittent "attestation failed"/stalled-admission/EOF
-# errors on every crew role, not a config bug). This ref also needs the operator-side edge's own
-# half of the same fix (CADS-Tunnel commit ff415a8) to actually take effect -- that's the remote
-# bunsenbrenner.org edge infrastructure this demo tunnels through, not anything built or deployed
-# from this repo.
-ARG CT_AGENT_REF=eb4de4d2427ce51e301c0bf31582cce4bbaa097c
+# Agent.Dockerfile pin convention. Bumped 2026-08-13 (v0.4.6, live-diagnosed): the previous pin
+# (v0.4.4, eb4de4d2) had ct-agent#15's TCP-fallback keepalive fix but was still hot-looping on
+# "channel join admission exchange stalled (#140)" on every role-serve container. v0.4.5 added a
+# low-DPI-visibility channel-dial fallback rung (ALPN h2 / SNI edge-cdn.invalid); v0.4.6 fixed
+# present_channel_join_via_ladder treating a Refused outcome as "rung finished" instead of
+# falling through to try that new rung -- found via a live test against this exact production
+# edge the same day. Keep in sync with Agent.Dockerfile's own CT_AGENT_REF.
+ARG CT_AGENT_REF=8f59ea1f0dc122b7257146bebe9072218ad79786
 RUN git clone https://github.com/scimbe/ct-agent.git /build && cd /build && git checkout "${CT_AGENT_REF}"
 WORKDIR /build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

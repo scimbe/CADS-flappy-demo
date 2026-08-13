@@ -39,7 +39,12 @@ for primary_var in $(grep -oE '^CREW_[A-Z]+_GRANT=' .env | sed 's/=$//'); do
   role="${primary_var#CREW_}"; role="${role%_GRANT}"
   standby_var="CREW_${role}_STANDBY_GRANT"
   primary_val="$(grep "^${primary_var}=" .env | cut -d= -f2-)"
-  standby_val="$(grep "^${standby_var}=" .env | cut -d= -f2-)"
+  # `|| true`: a role with no standby configured at all (e.g. SAFETY) is the
+  # normal case, not a script error -- grep's own no-match exit 1 would
+  # otherwise abort the whole script under `set -e` before the `[ -n
+  # "$standby_val" ]` check below ever gets a chance to skip it correctly
+  # (caught live: this exact script aborted silently on this line).
+  standby_val="$(grep "^${standby_var}=" .env | cut -d= -f2- || true)"
   if [ -n "$standby_val" ] && [ "$primary_val" = "$standby_val" ]; then
     log "FATAL: ${primary_var} and ${standby_var} are IDENTICAL -- the standby candidate is not a distinct channel, #207 failover is silently broken for this role"
     DUP_FOUND=1

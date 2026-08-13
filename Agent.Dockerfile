@@ -18,13 +18,21 @@ FROM rust:1-slim-bookworm AS builder
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-# Bumped 2026-08-12 (live-diagnosed): the previous pin predated ct-agent#15's
-# TCP-fallback keepalive/ping-role fix (a parked connection generating no
-# real payload traffic got treated as idle and dropped by some firewall/DPI
-# gateways -- observed live here as intermittent "attestation failed"/
-# stalled-admission/EOF errors on every crew role, not a config bug). Keep in
-# sync with bridge/Dockerfile's own CT_AGENT_REF.
-ARG CT_AGENT_REF=eb4de4d2427ce51e301c0bf31582cce4bbaa097c
+# Bumped 2026-08-13 (v0.4.6, live-diagnosed): the previous pin (v0.4.4,
+# eb4de4d2) had ct-agent#15's TCP-fallback keepalive fix but was still
+# missing two later, more directly relevant fixes found via a live test
+# against this exact production edge the same day: v0.4.5 added a
+# low-DPI-visibility channel-dial fallback rung (ALPN h2 / SNI
+# edge-cdn.invalid, indistinguishable from ordinary HTTPS to
+# protocol-fingerprinting DPI/middleboxes), and v0.4.6 fixed
+# present_channel_join_via_ladder treating a Refused outcome as "rung
+# finished" instead of falling through to try the next rung -- which meant
+# v0.4.5's new fallback rung could never actually run in exactly the case
+# it exists for. This is very likely the actual fix for the persistent
+# "channel join admission exchange stalled (#140)" hot-loop observed on
+# every one of this demo's role-serve containers. Keep in sync with
+# bridge/Dockerfile's own CT_AGENT_REF.
+ARG CT_AGENT_REF=8f59ea1f0dc122b7257146bebe9072218ad79786
 RUN git clone https://github.com/scimbe/ct-agent.git /build && cd /build && git checkout "${CT_AGENT_REF}"
 WORKDIR /build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

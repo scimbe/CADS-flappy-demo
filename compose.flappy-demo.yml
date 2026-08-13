@@ -47,7 +47,7 @@ services:
       context: .
       dockerfile: Agent.Dockerfile
       args:
-        - CT_AGENT_REF=${CT_AGENT_REF:-eb4de4d2427ce51e301c0bf31582cce4bbaa097c}
+        - CT_AGENT_REF=${CT_AGENT_REF:-8f59ea1f0dc122b7257146bebe9072218ad79786}
     environment:
       - CT_AGENT_MODE=browser
       - CT_AGENT_HOSTNAME=flappy-demo.bunsenbrenner.org
