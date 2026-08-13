@@ -23,14 +23,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 # Which ct-agent commit to build -- bump deliberately, matching CADS-webconference-demo's own
-# Agent.Dockerfile pin convention. Bumped 2026-08-13 (v0.4.6, live-diagnosed): the previous pin
-# (v0.4.4, eb4de4d2) had ct-agent#15's TCP-fallback keepalive fix but was still hot-looping on
-# "channel join admission exchange stalled (#140)" on every role-serve container. v0.4.5 added a
-# low-DPI-visibility channel-dial fallback rung (ALPN h2 / SNI edge-cdn.invalid); v0.4.6 fixed
-# present_channel_join_via_ladder treating a Refused outcome as "rung finished" instead of
-# falling through to try that new rung -- found via a live test against this exact production
-# edge the same day. Keep in sync with Agent.Dockerfile's own CT_AGENT_REF.
-ARG CT_AGENT_REF=8f59ea1f0dc122b7257146bebe9072218ad79786
+# Agent.Dockerfile pin convention. Bumped 2026-08-13 (v0.4.7): confirms and targets this repo's
+# own root cause -- a channel session admitted over QUIC dies at the edge's 10s idle timeout the
+# moment an in-flight LLM call goes quiet on the wire (the ~14-15s "healthy then drops, even
+# mid-traffic" signature live-diagnosed here, see CADS-Tunnel#494). Adds CT_CHANNEL_FRONT_DOOR_ONLY
+# to pin channel sessions onto the :443 TLS-TCP front door instead. Also fixes ct-agent#16 (this
+# repo's own filed regression). Keep in sync with Agent.Dockerfile's own CT_AGENT_REF.
+ARG CT_AGENT_REF=9dcc455c4a050a5e7d24b766a41e0d7e04428086
 RUN git clone https://github.com/scimbe/ct-agent.git /build && cd /build && git checkout "${CT_AGENT_REF}"
 WORKDIR /build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

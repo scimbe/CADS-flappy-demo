@@ -18,21 +18,18 @@ FROM rust:1-slim-bookworm AS builder
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-# Bumped 2026-08-13 (v0.4.6, live-diagnosed): the previous pin (v0.4.4,
-# eb4de4d2) had ct-agent#15's TCP-fallback keepalive fix but was still
-# missing two later, more directly relevant fixes found via a live test
-# against this exact production edge the same day: v0.4.5 added a
-# low-DPI-visibility channel-dial fallback rung (ALPN h2 / SNI
-# edge-cdn.invalid, indistinguishable from ordinary HTTPS to
-# protocol-fingerprinting DPI/middleboxes), and v0.4.6 fixed
-# present_channel_join_via_ladder treating a Refused outcome as "rung
-# finished" instead of falling through to try the next rung -- which meant
-# v0.4.5's new fallback rung could never actually run in exactly the case
-# it exists for. This is very likely the actual fix for the persistent
-# "channel join admission exchange stalled (#140)" hot-loop observed on
-# every one of this demo's role-serve containers. Keep in sync with
-# bridge/Dockerfile's own CT_AGENT_REF.
-ARG CT_AGENT_REF=8f59ea1f0dc122b7257146bebe9072218ad79786
+# Bumped 2026-08-13 (v0.4.7): v0.4.7's own changelog directly confirms this
+# demo's root cause -- "a session admitted over QUIC dies with the next flap
+# at the edge's 10s idle timeout (the observed ~14-15s 'healthy then drops,
+# even mid-traffic' signature -- an in-flight LLM call sends no QUIC
+# packets)" -- exactly the ~14-15s window this repo's role-serve containers
+# were live-diagnosed hitting (see CADS-Tunnel#494). v0.4.7 adds
+# CT_CHANNEL_FRONT_DOOR_ONLY to pin channel sessions onto the :443 TLS-TCP
+# front door instead of flaky QUIC, plus fixes ct-agent#16 (this repo's own
+# filed regression: agent registration only fell back to TCP on the FIRST
+# dial, so a mid-life UDP flap took the whole demo down for the flap's
+# duration). Keep in sync with bridge/Dockerfile's own CT_AGENT_REF.
+ARG CT_AGENT_REF=9dcc455c4a050a5e7d24b766a41e0d7e04428086
 RUN git clone https://github.com/scimbe/ct-agent.git /build && cd /build && git checkout "${CT_AGENT_REF}"
 WORKDIR /build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
