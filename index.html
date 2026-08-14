@@ -637,10 +637,18 @@ let dispose = null;
 // config never exposes the password either. The real production gate is Caddy
 // basic auth in front (see the demo README); this stays the friendly first layer.
 let GATE_HASH = null;
-fetch("gate.json", { cache: "no-store" })
-  .then((r) => (r.ok ? r.json() : null))
-  .then((j) => { GATE_HASH = j && j.sha256; })
-  .catch(() => {});
+// #494-follow: a submit that races the initial fetch used to read a still-null GATE_HASH as a
+// permanent "not loaded" failure, even though the fetch itself succeeds moments later -- a page
+// load slow enough for the user to type+submit before the network round-trip settles reproduced
+// this every time. loadGateHash() is now re-awaitable from the submit handler itself instead of
+// being a fire-and-forget promise the handler can only read a snapshot of.
+function loadGateHash() {
+  return fetch("gate.json", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => { GATE_HASH = j && j.sha256; return GATE_HASH; })
+    .catch(() => null);
+}
+let gateHashPromise = loadGateHash();
 async function sha256hex(s) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -649,6 +657,14 @@ function unlock() { $("gate").style.display = "none"; $("studio").style.display 
 if (sessionStorage.getItem("fps-unlocked") === "1") unlock();
 $("gateForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!GATE_HASH) {
+    // Still in flight, or the first attempt failed (e.g. a transient network blip) -- wait for the
+    // in-flight fetch, or start a fresh one if the last one already settled without a hash, rather
+    // than reporting "not loaded" for a condition that may already be resolved or about to resolve.
+    $("gateMsg").textContent = "Checking access config…";
+    gateHashPromise = gateHashPromise.then((h) => h ?? loadGateHash());
+    await gateHashPromise;
+  }
   if (!GATE_HASH) {
     $("gateMsg").textContent = "Access config (gate.json) not loaded — see the demo README.";
     return;
