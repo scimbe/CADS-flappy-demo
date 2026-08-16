@@ -571,8 +571,17 @@ function runFlappy(canvas, CONFIG) {
     ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
     ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.strokeText(s, W / 2, y); ctx.fillText(s, W / 2, y);
   }
+  // 2026-08-16, operator request: credit the source URL on every downloaded/shared game, not
+  // just the live preview -- this is in the shared engine (both draw() paths use it), so a
+  // generated standalone .html carries the same watermark wherever it ends up embedded/shared.
+  function watermark() {
+    ctx.font = "9px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.fillStyle = "rgba(255,255,255,.6)";
+    ctx.strokeText("https://flappy-demo.bunsenbrenner.org/", W / 2, H - 4);
+    ctx.fillText("https://flappy-demo.bunsenbrenner.org/", W / 2, H - 4);
+  }
   function draw(dt) {
-    sky(); bgFx(dt || 0); for (const p of pipes) pipe(p); ground(); drawBird();
+    sky(); bgFx(dt || 0); for (const p of pipes) pipe(p); ground(); drawBird(); watermark();
     text(String(score), 60, 40);
     if (state === "ready") { text(C.title || "Flappy", H * 0.3, 24, TH.accent);
       text("tap / space to start", H * 0.3 + 30, 14, "#fff"); }
@@ -659,7 +668,10 @@ async function sha256hex(s) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 function unlock() { $("gate").style.display = "none"; $("studio").style.display = "block"; startPreview(); }
-if (sessionStorage.getItem("fps-unlocked") === "1") unlock();
+// 2026-08-16, operator request: no more password prompt, land directly on the studio.
+// Password-gate code below is left in place (dormant, gateForm is unreachable once #gate
+// is hidden) rather than deleted, so this is a one-line revert if the gate is wanted back.
+unlock();
 $("gateForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!GATE_HASH) {
