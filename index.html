@@ -726,12 +726,38 @@ let dispose = null;
     shareBar.style.display = "flex";
     const shareText = () => {
       const title = ($("title") && $("title").value.trim()) || "My Flappy Bird";
-      return `Check out the game I built: "${title}" 🐤\nhttps://flappy-demo.bunsenbrenner.org/`;
+      return `Check out the game I built: "${title}" 🐤\nBuild your own at https://flappy-demo.bunsenbrenner.org/`;
     };
-    $("shareWa")?.addEventListener("click", () => {
+    // 2026-08-16, operator follow-up: share BOTH the actual generated game (a real .html file,
+    // the same one "Generate my game" produces -- reuses readConfig()/buildProductHtml(), both
+    // function declarations defined later in this script but hoisted, so calling them here from
+    // a click handler that only fires after the whole script has run is safe) AND the editor
+    // link. A web page cannot hand a file to a SPECIFIC named app (WhatsApp/Gmail) directly --
+    // browsers only allow file handoff via the OS-mediated Web Share API, which opens the native
+    // share sheet and lets the user pick the target themselves; that's what both buttons below
+    // do when file-sharing is supported (Android Chrome, iOS Safari 15+). Where that's not
+    // available, falls back to the previous text+link-only deep link (wa.me / Gmail compose
+    // URL) -- no file in that case, but still functional rather than silently doing nothing.
+    async function shareWithGame() {
+      const cfg = readConfig();
+      const html = buildProductHtml(cfg);
+      const title = cfg.title || "My Flappy Bird";
+      const fileName = (title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "flappy") + ".html";
+      const file = new File([html], fileName, { type: "text/html" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title, text: shareText() });
+          return true;
+        } catch (e) { if (e && e.name === "AbortError") return true; }
+      }
+      return false;
+    }
+    $("shareWa")?.addEventListener("click", async () => {
+      if (await shareWithGame()) return;
       window.open("https://wa.me/?text=" + encodeURIComponent(shareText()), "_blank", "noopener");
     });
-    $("shareGmail")?.addEventListener("click", () => {
+    $("shareGmail")?.addEventListener("click", async () => {
+      if (await shareWithGame()) return;
       const su = encodeURIComponent("My Flappy Bird game");
       window.open("https://mail.google.com/mail/?view=cm&fs=1&su=" + su + "&body=" + encodeURIComponent(shareText()),
         "_blank", "noopener");
