@@ -77,8 +77,11 @@ FROM debian:bookworm-slim AS runtime
 # config, never the real prompted theme" symptom this session spent hours chasing as a
 # channel-pairing bug (CADS-Tunnel#494) before finding this separate, local cause once
 # pairing itself was fixed.
+# curl+jq: needed by litellm-shim.sh (CADS-Tunnel#528-follow, opt-in CT_LLM_CMD backend) when
+# a role is switched from the bind-mounted claude CLI to the litellm HTTP shim -- unused
+# otherwise, small enough to keep in the base image rather than a second variant.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates python3 \
+    && apt-get install -y --no-install-recommends ca-certificates python3 curl jq \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /tmp/ct-agent /usr/local/bin/ct-agent
 CMD ["ct-agent"]

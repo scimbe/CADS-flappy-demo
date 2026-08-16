@@ -14,6 +14,11 @@
 #     ./start-crew-serve.sh
 #
 #   ./start-crew-serve.sh --selftest   # verify the core script + handlers resolve, no network
+#
+# Optional: LLM_SHIM_HOST=/abs/path/to/litellm-shim.sh LLM_ENV_FILE=/abs/path/to/litellm.env
+# switches ALL THREE roles from the bind-mounted claude CLI to that shim (passed straight
+# through to serve-role-container.sh, see its own header for the exact opt-in contract).
+# Leave both unset for byte-identical old behavior (claude CLI, as before this existed).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -25,6 +30,8 @@ CORE_SCRIPT="$CT_TUNNEL_SRC/scripts/channel-ops/serve-role-container.sh"
 
 IMAGE="${IMAGE:-cads-flappy-demo-flappy-agent:latest}"
 DOCKER_NETWORK="${DOCKER_NETWORK:-flappy-demo_default}"
+LLM_SHIM_HOST="${LLM_SHIM_HOST:-}"
+LLM_ENV_FILE="${LLM_ENV_FILE:-}"
 
 ROLES="physics:text_generation:physics-handler.sh art:text_generation:art-handler.sh safety:safety_check:safety-check-handler.sh"
 
@@ -33,6 +40,8 @@ if [ "${1:-}" = "--selftest" ]; then
   for entry in $ROLES; do
     role="${entry%%:*}"; rest="${entry#*:}"; service="${rest%%:*}"; handler="${rest#*:}"
     IMAGE="$IMAGE" \
+    LLM_SHIM_HOST="$LLM_SHIM_HOST" \
+    LLM_ENV_FILE="$LLM_ENV_FILE" \
     HANDLER_CMD_HOST="$SCRIPT_DIR/handlers/$handler" \
     CONTAINER_NAME="flappy-${role}-serve" \
       "$CORE_SCRIPT" --selftest || ok=0
@@ -70,6 +79,8 @@ for entry in $ROLES; do
   CT_AGENT_EDGE_RELAY="$CT_AGENT_EDGE_RELAY" \
   HOLDER_KEY="$holder" NOISE_KEY="$noise" GRANT="$grant" \
   SERVICE="$service" \
+  LLM_SHIM_HOST="$LLM_SHIM_HOST" \
+  LLM_ENV_FILE="$LLM_ENV_FILE" \
   HANDLER_CMD_HOST="$SCRIPT_DIR/handlers/$handler" \
   CONTAINER_NAME="flappy-${role}-serve" \
     "$CORE_SCRIPT"
