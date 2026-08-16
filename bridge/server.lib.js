@@ -34,6 +34,8 @@
 
 const { spawn } = require("child_process");
 const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 
 // Global "prompts built" counter shown on the studio's main page. Counts successful builds only
 // (a stage:"built" terminal event) -- rejected/errored attempts don't produce a game, so counting
@@ -68,6 +70,93 @@ function incrementPromptCount() {
 }
 function getPromptCount() {
   return promptCount;
+}
+
+// #232, operator request: sharing should hand recipients a real, tappable link, not just a
+// downloaded/attached .html file (attachments need a "download & open" step in most chat apps
+// and don't preview; a link just opens). Each generated game is POSTed here once, stored under a
+// random UUID, and served back verbatim on GET -- a tiny, purpose-built pastebin, not a general
+// upload service (fixed size cap, fixed extension, no directory listing, no overwrite/delete).
+const SHARED_GAMES_DIR = process.env.CREW_SHARED_GAMES_DIR || "./data/shared-games";
+const SHARED_GAME_MAX_BYTES = 200 * 1024; // real games are ~10KB; generous headroom, not unbounded
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+try {
+  fs.mkdirSync(SHARED_GAMES_DIR, { recursive: true });
+} catch (e) {
+  process.stderr.write(`flappy-crew-bridge: could not create ${SHARED_GAMES_DIR}: ${e.message}\n`);
+}
+
+// Fixed-window rate limiter, keyed by caller IP -- same shape as CADS-webconference-demo's
+// bridge/server.js makeRateLimiter, reimplemented here since this repo has no shared dep on it.
+function makeRateLimiter(maxCount, windowMs) {
+  const hits = new Map(); // key -> { count, windowStart }
+  return function rateLimited(key) {
+    const now = Date.now();
+    const entry = hits.get(key);
+    if (!entry || now - entry.windowStart >= windowMs) {
+      hits.set(key, { count: 1, windowStart: now });
+      return false;
+    }
+    entry.count += 1;
+    return entry.count > maxCount;
+  };
+}
+const shareRateLimited = makeRateLimiter(10, 60 * 1000);
+const callerIp = (req) => (req.socket && req.socket.remoteAddress) || "unknown";
+
+function isValidSharedGameId(id) {
+  return typeof id === "string" && UUID_RE.test(id);
+}
+
+async function shareHandler(req, res) {
+  if (shareRateLimited(callerIp(req))) {
+    res.writeHead(429, { "content-type": "text/plain" });
+    return res.end("too many shares from this address, try again in a minute");
+  }
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    res.writeHead(400, { "content-type": "text/plain" });
+    return res.end("invalid JSON body");
+  }
+  const html = typeof body.html === "string" ? body.html : "";
+  if (!html || !html.startsWith("<!doctype html>")) {
+    res.writeHead(400, { "content-type": "text/plain" });
+    return res.end("expected {html: a full standalone game document}");
+  }
+  if (Buffer.byteLength(html, "utf8") > SHARED_GAME_MAX_BYTES) {
+    res.writeHead(413, { "content-type": "text/plain" });
+    return res.end(`game too large to share (max ${SHARED_GAME_MAX_BYTES} bytes)`);
+  }
+  const id = crypto.randomUUID();
+  const dest = path.join(SHARED_GAMES_DIR, `${id}.html`);
+  const tmp = `${dest}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, html, "utf8");
+    fs.renameSync(tmp, dest);
+  } catch (e) {
+    res.writeHead(500, { "content-type": "text/plain" });
+    return res.end(`could not persist shared game: ${e.message}`);
+  }
+  res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+  res.end(JSON.stringify({ id }));
+}
+
+function serveSharedGame(id, res) {
+  if (!isValidSharedGameId(id)) {
+    res.writeHead(404, { "content-type": "text/plain" });
+    return res.end("not found");
+  }
+  const filePath = path.join(SHARED_GAMES_DIR, `${id}.html`);
+  fs.readFile(filePath, "utf8", (err, html) => {
+    if (err) {
+      res.writeHead(404, { "content-type": "text/plain" });
+      return res.end("not found (this game link may be wrong, or has expired)");
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=86400" });
+    res.end(html);
+  });
 }
 
 const ROLE_CMD_TIMEOUT_MS = 60_000;
@@ -388,6 +477,21 @@ function requestListener(req, res) {
     res.end(JSON.stringify({ count: promptCount }));
     return;
   }
+  if (req.method === "POST" && req.url === "/share") {
+    shareHandler(req, res).catch((e) => {
+      try {
+        res.writeHead(500, { "content-type": "text/plain" });
+        res.end(`internal error: ${e.message}`);
+      } catch {
+        /* response already sent */
+      }
+    });
+    return;
+  }
+  if (req.method === "GET" && req.url.startsWith("/g/")) {
+    serveSharedGame(req.url.slice("/g/".length), res);
+    return;
+  }
   res.writeHead(404, { "content-type": "text/plain" });
   res.end("not found");
 }
@@ -406,4 +510,7 @@ module.exports = {
   requestListener,
   incrementPromptCount,
   getPromptCount,
+  isValidSharedGameId,
+  shareHandler,
+  serveSharedGame,
 };

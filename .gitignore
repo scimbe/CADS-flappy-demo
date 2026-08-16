@@ -1,3 +1,8 @@
 .env
 .env.crew-serve
 .local-operator/
+# Local/test runtime state for the shared-games pastebin (#232) -- in Docker this is the
+# flappy_crew_state volume instead (CREW_SHARED_GAMES_DIR=/srv/data/shared-games), never baked
+# into the image or committed.
+bridge/data/
+data/

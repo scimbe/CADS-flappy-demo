@@ -141,6 +141,10 @@ services:
       # persistent storage worth keeping (same reasoning as CADS-webconference-demo's
       # access-requests volume).
       - CREW_PROMPT_COUNT_FILE=/srv/data/prompt-count.json
+      # #232: shared/hosted games (POST /share -> GET /g/:id), same persistent volume as the
+      # prompt counter above -- a UUID-addressed pastebin for the exact standalone .html
+      # "Generate my game" already produces, so a share link survives a bridge restart.
+      - CREW_SHARED_GAMES_DIR=/srv/data/shared-games
     volumes:
       - flappy_crew_state:/srv/data
     expose:

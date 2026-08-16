@@ -136,3 +136,58 @@ async function collect(safety, physicsCmds, art) {
   await mod.runCrewStreaming("test prompt", safety, physicsCmds, artCmds, fakeRes);
   return chunks.join("").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 }
+
+// #232: POST /share -> GET /g/:id, the shared-game pastebin.
+const { EventEmitter } = require("node:events");
+
+test("isValidSharedGameId: accepts a real UUID, rejects everything else (incl. path traversal)", () => {
+  assert.equal(mod.isValidSharedGameId("550e8400-e29b-41d4-a716-446655440000"), true);
+  assert.equal(mod.isValidSharedGameId("not-a-uuid"), false);
+  assert.equal(mod.isValidSharedGameId("../../etc/passwd"), false);
+  assert.equal(mod.isValidSharedGameId(""), false);
+  assert.equal(mod.isValidSharedGameId(undefined), false);
+});
+
+test("shareHandler + serveSharedGame: round-trips a real standalone game document", async () => {
+  const html = "<!doctype html><html><body>test game</body></html>";
+  const req = new EventEmitter();
+  req.socket = { remoteAddress: "203.0.113.5" }; // TEST-NET-3, distinct key per test run
+  const resChunks = [];
+  let resStatus = null;
+  const res = { writeHead(status) { resStatus = status; }, end(chunk) { if (chunk) resChunks.push(chunk); } };
+
+  const sharePromise = mod.shareHandler(req, res);
+  process.nextTick(() => { req.emit("data", JSON.stringify({ html })); req.emit("end"); });
+  await sharePromise;
+
+  assert.equal(resStatus, 200);
+  const { id } = JSON.parse(resChunks.join(""));
+  assert.ok(mod.isValidSharedGameId(id));
+
+  const serveChunks = [];
+  let serveStatus = null;
+  await new Promise((resolve) => {
+    mod.serveSharedGame(id, { writeHead(s) { serveStatus = s; }, end(c) { if (c) serveChunks.push(c); resolve(); } });
+  });
+  assert.equal(serveStatus, 200);
+  assert.equal(serveChunks.join(""), html);
+});
+
+test("shareHandler: rejects a body that isn't a full standalone document", async () => {
+  const req = new EventEmitter();
+  req.socket = { remoteAddress: "203.0.113.6" };
+  let status = null;
+  const res = { writeHead(s) { status = s; }, end() {} };
+  const p = mod.shareHandler(req, res);
+  process.nextTick(() => { req.emit("data", JSON.stringify({ html: "<script>not a real game</script>" })); req.emit("end"); });
+  await p;
+  assert.equal(status, 400);
+});
+
+test("serveSharedGame: an invalid/path-traversal id 404s instead of touching the filesystem", async () => {
+  let status = null;
+  await new Promise((resolve) => {
+    mod.serveSharedGame("../../../etc/passwd", { writeHead(s) { status = s; }, end() { resolve(); } });
+  });
+  assert.equal(status, 404);
+});

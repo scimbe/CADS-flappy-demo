@@ -724,42 +724,51 @@ let dispose = null;
   const shareBar = $("shareBar");
   if (shareBar) {
     shareBar.style.display = "flex";
-    const shareText = () => {
-      const title = ($("title") && $("title").value.trim()) || "My Flappy Bird";
-      return `Check out the game I built: "${title}" 🐤\nBuild your own at https://flappy-demo.bunsenbrenner.org/`;
-    };
-    // 2026-08-16, operator follow-up: share BOTH the actual generated game (a real .html file,
-    // the same one "Generate my game" produces -- reuses readConfig()/buildProductHtml(), both
-    // function declarations defined later in this script but hoisted, so calling them here from
-    // a click handler that only fires after the whole script has run is safe) AND the editor
-    // link. A web page cannot hand a file to a SPECIFIC named app (WhatsApp/Gmail) directly --
-    // browsers only allow file handoff via the OS-mediated Web Share API, which opens the native
-    // share sheet and lets the user pick the target themselves; that's what both buttons below
-    // do when file-sharing is supported (Android Chrome, iOS Safari 15+). Where that's not
-    // available, falls back to the previous text+link-only deep link (wa.me / Gmail compose
-    // URL) -- no file in that case, but still functional rather than silently doing nothing.
-    async function shareWithGame() {
+    // 2026-08-16, operator follow-up (2nd iteration): a raw attached/downloaded file needs a
+    // "download & open" step in most chat apps and never previews -- a real, hosted, tappable
+    // link is strictly better UX and works identically on every device (no Web Share API /
+    // file-support feature-detection needed at all). Each share POSTs the exact standalone game
+    // "Generate my game" would produce (readConfig()/buildProductHtml(), hoisted function
+    // declarations defined later in this script) to /share, gets back a UUID, and shares
+    // https://flappy-demo.bunsenbrenner.org/g/<uuid> -- opening that link plays the game
+    // directly (fills the viewport, no editor chrome) with the editor link shown right after it
+    // (see buildProductHtml's own #editorLink). Falls back to sharing just the plain editor
+    // link if the upload fails (offline, bridge down, etc.) rather than sharing nothing.
+    async function hostedGameUrl() {
       const cfg = readConfig();
       const html = buildProductHtml(cfg);
-      const title = cfg.title || "My Flappy Bird";
-      const fileName = (title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "flappy") + ".html";
-      const file = new File([html], fileName, { type: "text/html" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({ files: [file], title, text: shareText() });
-          return true;
-        } catch (e) { if (e && e.name === "AbortError") return true; }
-      }
-      return false;
+      const resp = await fetch("/share", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ html }),
+      });
+      if (!resp.ok) throw new Error("share upload failed: " + resp.status);
+      const { id } = await resp.json();
+      return "https://flappy-demo.bunsenbrenner.org/g/" + id;
     }
-    $("shareWa")?.addEventListener("click", async () => {
-      if (await shareWithGame()) return;
-      window.open("https://wa.me/?text=" + encodeURIComponent(shareText()), "_blank", "noopener");
+    async function shareText() {
+      const title = ($("title") && $("title").value.trim()) || "My Flappy Bird";
+      let gameUrl;
+      try { gameUrl = await hostedGameUrl(); } catch { gameUrl = null; }
+      const lines = [`Check out the game I built: "${title}" 🐤`];
+      if (gameUrl) lines.push(gameUrl);
+      lines.push("Build your own at https://flappy-demo.bunsenbrenner.org/");
+      return lines.join("\n");
+    }
+    $("shareWa")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget; const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = "…";
+      const text = await shareText();
+      btn.disabled = false; btn.textContent = orig;
+      window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank", "noopener");
     });
-    $("shareGmail")?.addEventListener("click", async () => {
-      if (await shareWithGame()) return;
+    $("shareGmail")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget; const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = "…";
+      const text = await shareText();
+      btn.disabled = false; btn.textContent = orig;
       const su = encodeURIComponent("My Flappy Bird game");
-      window.open("https://mail.google.com/mail/?view=cm&fs=1&su=" + su + "&body=" + encodeURIComponent(shareText()),
+      window.open("https://mail.google.com/mail/?view=cm&fs=1&su=" + su + "&body=" + encodeURIComponent(text),
         "_blank", "noopener");
     });
   }
@@ -1291,15 +1300,21 @@ function buildProductHtml(cfg) {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${safeTitle}</title>
-<style>html,body{margin:0;height:100%;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:manipulation}
-canvas{image-rendering:pixelated;max-width:100vw;max-height:100vh;box-shadow:0 0 30px rgba(0,0,0,.6)}</style>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:manipulation}
+#wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+canvas{image-rendering:pixelated;max-width:100vw;box-shadow:0 0 30px rgba(0,0,0,.6)}
+#editorLink{color:#fff;opacity:.7;font:13px system-ui,sans-serif;text-decoration:none;text-align:center}
+#editorLink:hover,#editorLink:active{opacity:1;text-decoration:underline}</style>
 </head><body>
+<div id="wrap">
 <canvas id="c" width="288" height="512"></canvas>
+<a id="editorLink" href="https://flappy-demo.bunsenbrenner.org/" target="_blank" rel="noopener">🎮 Build your own at flappy-demo.bunsenbrenner.org</a>
+</div>
 <script>
 "use strict";
 const CONFIG = ${JSON.stringify(config).replace(/</g, "\\u003c")};
 const runFlappy = ${ENGINE_SRC};
-function fit(){const c=document.getElementById("c");const s=Math.min(innerWidth/288,innerHeight/512);
+function fit(){const c=document.getElementById("c");const s=Math.min(innerWidth/288,(innerHeight-36)/512);
 c.style.width=(288*s)+"px";c.style.height=(512*s)+"px";}
 addEventListener("resize",fit);fit();
 runFlappy(document.getElementById("c"), CONFIG);
