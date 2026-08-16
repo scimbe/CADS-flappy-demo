@@ -253,7 +253,10 @@
       <h2>Prompt the agent crew</h2>
       <p class="phint">Describe the game you want and the crew (🕹️ physics · 🎨 art · 🧩 integration) builds it.
         Keep prompting to refine, or download anytime. A prompt that tries to subvert the system instead of
-        describing a game is rejected — and your current game is kept.</p>
+        describing a game is rejected — and your current game is kept.
+        <br><b>Heads up:</b> parts of the crew run on a small, self-hosted open model
+        (currently <code>devstral-small2</code>), not a giant frontier one — don't expect miracles on obscure
+        references; everyday themes, colors, and moods work best.</p>
       <div class="promptrow">
         <textarea id="prompt" rows="2" maxlength="400"
           placeholder="e.g. a hard night level with a rocket bird and a pink background"></textarea>
@@ -382,10 +385,12 @@
         <li><b>🎨 Art</b> — palette, bird, theme, the game's look</li>
         <li><b>🧩 Integration</b> — assembles the parts into one self-contained product</li>
       </ul>
-      <p style="margin-top:8px">Each role is (or becomes) a real agent discovered via
-        <code>/registry/agents?role=…</code> or provisioned by central; the marketplace clears the job and each
-        agent answers a <code>service/&lt;slug&gt;</code> call. <i>Today the crew's contributions are computed in-page
-        (the honest MVP); wiring each role to a live LLM agent over the channel is the next step.</i></p>
+      <p style="margin-top:8px">Each role is a real agent reachable over the zero-knowledge tunnel; the marketplace
+        clears the job and each agent answers a <code>service/&lt;slug&gt;</code> call. Physics and art are today
+        served by independently-operated agents (source-2, sink) — with a self-hosted fallback (central, running the
+        open <code>devstral-small2</code> model) if either is unreachable; safety-check runs on that same self-hosted
+        model. <b>Don't expect miracles from the smaller open model</b> on niche brand/pop-culture references — it
+        does its best with a small set of built-in hints, but it isn't a giant frontier model.</p>
       <p style="margin-top:8px"><b>Prompt it.</b> Describe a game in the prompt box and the crew builds it — but the
         prompt is <b>safety-guarded</b> first: it must read as a game change, not an <i>anti-prompt</i> trying to
         subvert the system (those are rejected and your current game kept). The build screen shows the
