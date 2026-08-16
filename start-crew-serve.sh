@@ -16,9 +16,19 @@
 #   ./start-crew-serve.sh --selftest   # verify the core script + handlers resolve, no network
 #
 # Optional: LLM_SHIM_HOST=/abs/path/to/litellm-shim.sh LLM_ENV_FILE=/abs/path/to/litellm.env
-# switches ALL THREE roles from the bind-mounted claude CLI to that shim (passed straight
-# through to serve-role-container.sh, see its own header for the exact opt-in contract).
-# Leave both unset for byte-identical old behavior (claude CLI, as before this existed).
+# switches roles from the bind-mounted claude CLI to that shim (passed straight through to
+# serve-role-container.sh, see its own header for the exact opt-in contract). Leave both
+# unset for byte-identical old behavior (claude CLI, as before this existed).
+#
+# LLM_SHIM_DISABLED_ROLES="art" (space-separated role names) forces those specific roles
+# back onto the claude CLI even when LLM_SHIM_HOST is set globally -- e.g. 2026-08-16:
+# art's actual output quality on niche/knowledge-heavy prompts (real example: "freebsd
+# theme" — local-mistral-small picked generic blue/no-emoji, missing the FreeBSD "Beastie"
+# red-devil association claude gets right every time) didn't hold up under real use, even
+# though it passed the pre-rollout A/B harness (generic theme prompts only — that harness
+# never covered niche cultural/technical references, the actual gap). physics (numeric
+# difficulty-word mapping) and safety_check (binary classification) don't need that kind
+# of broad world knowledge and have stayed on litellm without a reported regression.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -32,6 +42,20 @@ IMAGE="${IMAGE:-cads-flappy-demo-flappy-agent:latest}"
 DOCKER_NETWORK="${DOCKER_NETWORK:-flappy-demo_default}"
 LLM_SHIM_HOST="${LLM_SHIM_HOST:-}"
 LLM_ENV_FILE="${LLM_ENV_FILE:-}"
+LLM_SHIM_DISABLED_ROLES="${LLM_SHIM_DISABLED_ROLES:-}"
+
+role_shim_host() {
+  for disabled in $LLM_SHIM_DISABLED_ROLES; do
+    [ "$disabled" = "$1" ] && { printf ''; return; }
+  done
+  printf '%s' "$LLM_SHIM_HOST"
+}
+role_llm_env_file() {
+  for disabled in $LLM_SHIM_DISABLED_ROLES; do
+    [ "$disabled" = "$1" ] && { printf ''; return; }
+  done
+  printf '%s' "$LLM_ENV_FILE"
+}
 
 ROLES="physics:text_generation:physics-handler.sh art:text_generation:art-handler.sh safety:safety_check:safety-check-handler.sh"
 
@@ -40,8 +64,8 @@ if [ "${1:-}" = "--selftest" ]; then
   for entry in $ROLES; do
     role="${entry%%:*}"; rest="${entry#*:}"; service="${rest%%:*}"; handler="${rest#*:}"
     IMAGE="$IMAGE" \
-    LLM_SHIM_HOST="$LLM_SHIM_HOST" \
-    LLM_ENV_FILE="$LLM_ENV_FILE" \
+    LLM_SHIM_HOST="$(role_shim_host "$role")" \
+    LLM_ENV_FILE="$(role_llm_env_file "$role")" \
     HANDLER_CMD_HOST="$SCRIPT_DIR/handlers/$handler" \
     CONTAINER_NAME="flappy-${role}-serve" \
       "$CORE_SCRIPT" --selftest || ok=0
@@ -79,8 +103,8 @@ for entry in $ROLES; do
   CT_AGENT_EDGE_RELAY="$CT_AGENT_EDGE_RELAY" \
   HOLDER_KEY="$holder" NOISE_KEY="$noise" GRANT="$grant" \
   SERVICE="$service" \
-  LLM_SHIM_HOST="$LLM_SHIM_HOST" \
-  LLM_ENV_FILE="$LLM_ENV_FILE" \
+  LLM_SHIM_HOST="$(role_shim_host "$role")" \
+  LLM_ENV_FILE="$(role_llm_env_file "$role")" \
   HANDLER_CMD_HOST="$SCRIPT_DIR/handlers/$handler" \
   CONTAINER_NAME="flappy-${role}-serve" \
     "$CORE_SCRIPT"

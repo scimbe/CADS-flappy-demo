@@ -62,6 +62,12 @@ log "starting the 3 role-serve containers via start-crew-serve.sh"
 # litellm backend (2026-08-16, tested + live-verified against physics/art/safety-check's
 # real prompts, see .local-operator/litellm.env) -- unset both here to roll every role back
 # to the bind-mounted claude CLI, byte-identical to before this existed.
+#
+# art is force-excluded (LLM_SHIM_DISABLED_ROLES): live use surfaced a real quality gap on
+# niche/knowledge-heavy prompts the pre-rollout A/B harness never covered (e.g. "freebsd
+# theme" -> claude correctly picks the red "Beastie" devil association, local-mistral-small
+# just picks generic blue/no-emoji). physics/safety_check stayed on litellm without a
+# reported regression -- see start-crew-serve.sh's own header for the full account.
 ENV_FILE="$(pwd)/.env.crew-serve" \
 CT_TUNNEL_SRC=/home/becke/workflow-pipelines/.demo-checkouts/CADS-Tunnel \
 CT_AGENT_EDGE_BROKER=57.131.133.91:4435 \
@@ -69,6 +75,7 @@ CT_AGENT_EDGE_RELAY=57.131.133.91:4436 \
 DOCKER_NETWORK=flappy-demo_default \
 LLM_SHIM_HOST="$(pwd)/litellm-shim.sh" \
 LLM_ENV_FILE="$(pwd)/.local-operator/litellm.env" \
+LLM_SHIM_DISABLED_ROLES="art" \
   ./start-crew-serve.sh || log "start-crew-serve.sh failed -- role-serve containers may already exist from a prior run; check 'docker ps | grep flappy-.*-serve'"
 
 log "done"
