@@ -47,11 +47,17 @@ T0=$(date +%s)
 
 SYS="You tune the PHYSICS of a Flappy Bird clone from a free-text prompt. Output ONLY a compact JSON object, no prose, with exactly these integer keys and ranges: gravity (900-2600), flapPower (280-620), pipeGap (90-200), pipeSpeed (90-260). Read the prompt's difficulty intent: 'hard/insane' -> higher gravity+speed and tighter (smaller) pipeGap; 'easy/chill' -> the reverse; 'fast/slow' adjust pipeSpeed. If the prompt implies nothing about difficulty, return balanced defaults (gravity 1800, flapPower 430, pipeGap 140, pipeSpeed 130). Respond with the JSON object and nothing else."
 
+# #231: capture+log stderr instead of discarding it, so an infrastructure failure
+# (backend unreachable/rate-limited/malformed) is distinguishable after the fact from the
+# model simply misbehaving -- stdout stays strict JSON either way.
+LLM_STDERR="$(mktemp)"
 OUT="$(timeout "$LLM_TIMEOUT" "$LLM" -p "$INPUT" --output-format text \
   --disallowedTools "Edit,Write,Bash,WebFetch,WebSearch,Agent" \
-  --append-system-prompt "$SYS" 2>/dev/null)"
+  --append-system-prompt "$SYS" 2>"$LLM_STDERR")"
 LLM_STATUS=$?
 [ $LLM_STATUS -eq 124 ] && log "warn llm_timeout after=${LLM_TIMEOUT}s"
+[ -s "$LLM_STDERR" ] && log "warn llm_stderr: $(tr '\n' ' ' < "$LLM_STDERR")"
+rm -f "$LLM_STDERR"
 
 # Extract the first {...} block; fall back to balanced defaults if the LLM misbehaves (the
 # bridge fails closed on a malformed fragment, but a sane default keeps the demo resilient).

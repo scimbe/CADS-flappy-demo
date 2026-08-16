@@ -81,13 +81,45 @@ INPUT="$(cat)"
 log "start input_len=${#INPUT}"
 T0=$(date +%s)
 
-SYS="You art-direct a Flappy Bird clone from a free-text prompt. Output ONLY a compact JSON object, no prose, with these keys: theme (one of: day, night, sunset, retro, candy — the closest mood, a fallback), birdColor (a #rrggbb hex), birdEmoji (a single emoji that fits the prompt, or an empty string for a plain tinted bird), title (a short on-topic game title, <= 28 chars), and — IMPORTANT (#176) — a 'palette' object so you can invent a FULL custom colour scheme instead of only picking a preset: palette has exactly skyTop, skyBottom, pipe, pipeEdge, ground, groundEdge, accent, each a #rrggbb hex — ALL SEVEN are REQUIRED, include every one (a missing key breaks the game). Design the palette to match the prompt (e.g. 'cozy autumn forest at dusk' -> warm dusk sky gradient, amber pipes, dark-earth ground). Always include palette. Optionally (#177) also include 'pipeEmoji': a SINGLE emoji used as the obstacle shape when it fits the theme (🌲 forest, 🌵 desert, 🧊 ice, 🏭 industrial), or omit it for classic pipes. Optionally (#178) also include 'bgEffect': an animated background named 'matrix-rain' (falling green glyphs), 'snow', or 'stars' when it fits the prompt (e.g. 'matrix' -> matrix-rain), or omit it for a static sky. Match the prompt's vibe (e.g. 'matrix' -> green #00ff41 bird, 🕶️, dark palette, matrix-rain background, a Matrix-y title). Respond with the JSON object and nothing else."
+# #230: small local models (litellm/Ollama-backed) reliably miss specific brand/mascot/
+# franchise identities that a broad-training model gets right without help (e.g. "freebsd
+# theme" -> a local model picked generic blue with no bird emoji at all, missing the
+# FreeBSD "Beastie" red-devil association). Case-insensitive substring-match the prompt
+# against handlers/art-reference-hints.txt and hand any matched facts to the model
+# directly -- turns "does the model already know this" into "can it use a fact it's
+# given", which closes most of the gap regardless of which backend CT_LLM_CMD points at.
+HINTS_FILE="$(dirname "$0")/art-reference-hints.txt"
+REFERENCE_HINTS=""
+if [ -f "$HINTS_FILE" ]; then
+  LOWER_INPUT="$(printf '%s' "$INPUT" | tr '[:upper:]' '[:lower:]')"
+  while IFS=: read -r hint_key hint_text; do
+    case "$hint_key" in ""|"#"*) continue ;; esac
+    case "$LOWER_INPUT" in
+      *"$hint_key"*) REFERENCE_HINTS="$REFERENCE_HINTS
+- $hint_text" ;;
+    esac
+  done < "$HINTS_FILE"
+fi
+[ -n "$REFERENCE_HINTS" ] && log "reference hints matched: $(printf '%s' "$REFERENCE_HINTS" | tr '\n' ' ')"
 
+SYS="You art-direct a Flappy Bird clone from a free-text prompt. Output ONLY a compact JSON object, no prose, with these keys: theme (one of: day, night, sunset, retro, candy — the closest mood, a fallback), birdColor (a #rrggbb hex), birdEmoji (a single emoji that fits the prompt, or an empty string for a plain tinted bird), title (a short on-topic game title, <= 28 chars), and — IMPORTANT (#176) — a 'palette' object so you can invent a FULL custom colour scheme instead of only picking a preset: palette has exactly skyTop, skyBottom, pipe, pipeEdge, ground, groundEdge, accent, each a #rrggbb hex — ALL SEVEN are REQUIRED, include every one (a missing key breaks the game). Design the palette to match the prompt (e.g. 'cozy autumn forest at dusk' -> warm dusk sky gradient, amber pipes, dark-earth ground). Always include palette. Optionally (#177) also include 'pipeEmoji': a SINGLE emoji used as the obstacle shape when it fits the theme (🌲 forest, 🌵 desert, 🧊 ice, 🏭 industrial), or omit it for classic pipes. Optionally (#178) also include 'bgEffect': an animated background named 'matrix-rain' (falling green glyphs), 'snow', or 'stars' when it fits the prompt (e.g. 'matrix' -> matrix-rain), or omit it for a static sky. Match the prompt's vibe (e.g. 'matrix' -> green #00ff41 bird, 🕶️, dark palette, matrix-rain background, a Matrix-y title). Respond with the JSON object and nothing else."
+if [ -n "$REFERENCE_HINTS" ]; then
+  SYS="$SYS
+
+Known facts relevant to this prompt (use them if they fit; stay creative for anything else):$REFERENCE_HINTS"
+fi
+
+# #231: capture+log stderr instead of discarding it, so an infrastructure failure
+# (backend unreachable/rate-limited/malformed) is distinguishable after the fact from the
+# model simply misbehaving -- stdout stays strict JSON either way.
+LLM_STDERR="$(mktemp)"
 OUT="$(timeout "$LLM_TIMEOUT" "$LLM" -p "$INPUT" --output-format text \
   --disallowedTools "Edit,Write,Bash,WebFetch,WebSearch,Agent" \
-  --append-system-prompt "$SYS" 2>/dev/null)"
+  --append-system-prompt "$SYS" 2>"$LLM_STDERR")"
 LLM_STATUS=$?
 [ $LLM_STATUS -eq 124 ] && log "warn llm_timeout after=${LLM_TIMEOUT}s"
+[ -s "$LLM_STDERR" ] && log "warn llm_stderr: $(tr '\n' ' ' < "$LLM_STDERR")"
+rm -f "$LLM_STDERR"
 
 JSON="$(printf '%s' "$OUT" | extract_json_object | complete_palette)"
 DUR=$(( $(date +%s) - T0 ))

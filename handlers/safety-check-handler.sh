@@ -13,7 +13,13 @@ set -uo pipefail
 REQ_ID="$$-$(date -u +%s)-$RANDOM"
 log() { printf '[%s] handler=safety_check(flappy) req=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REQ_ID" "$*" | tee -a "${CT_HANDLER_LOG_DIR:-/home/becke/workflow-pipelines/.demo-checkouts/handler-logs}/safety-check-flappy.log" >&2; }
 
-LLM_TIMEOUT="${CT_HANDLER_TIMEOUT:-30}"
+# #231: was 30s (physics/art already use 45s). Live-measured 2026-08-16 against the shared
+# litellm instance: 1/20 calls hit exactly this timeout under normal shared-GPU contention
+# from other projects (confirmed via the llm_stderr/llm_timeout logging added the same day,
+# not guessed) -- a fail-closed safety gate timing out under load rejects a legitimate
+# request every time that happens, so matching physics/art's existing margin is the safer
+# default now that CT_LLM_CMD may point at shared infrastructure instead of a dedicated CLI.
+LLM_TIMEOUT="${CT_HANDLER_TIMEOUT:-45}"
 LLM="${CT_LLM_CMD:-claude}"
 INPUT="$(cat)"
 log "start input_len=${#INPUT}"
@@ -23,11 +29,20 @@ SYS="You are a safety classifier for a Flappy Bird customization tool's prompt b
 
 # A hung classifier call must still fail CLOSED, not hang the serve slot forever — the timeout
 # guarantees a bounded wait either way (empty VERDICT below already fails closed on reject).
+#
+# #231: stderr used to go straight to /dev/null, so an infrastructure failure (backend
+# unreachable, rate-limited, malformed response) and a genuine model REJECT were both
+# reduced to the same opaque "not a valid game-customization request" fallback -- no way to
+# tell, after the fact, whether a rejected build was a real safety call or a transient
+# CT_LLM_CMD failure. Now captured and logged (never on stdout -- that stays strict JSON).
+LLM_STDERR="$(mktemp)"
 VERDICT="$(timeout "$LLM_TIMEOUT" "$LLM" -p "$INPUT" --output-format text \
   --disallowedTools "Edit,Write,Bash,WebFetch,WebSearch,Agent" \
-  --append-system-prompt "$SYS" 2>/dev/null)"
+  --append-system-prompt "$SYS" 2>"$LLM_STDERR")"
 LLM_STATUS=$?
 [ $LLM_STATUS -eq 124 ] && log "warn llm_timeout after=${LLM_TIMEOUT}s"
+[ -s "$LLM_STDERR" ] && log "warn llm_stderr: $(tr '\n' ' ' < "$LLM_STDERR")"
+rm -f "$LLM_STDERR"
 
 # Emit strict JSON. Unknown / empty / non-ACCEPT verdicts fail closed (reject).
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }

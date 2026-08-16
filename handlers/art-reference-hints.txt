@@ -1,0 +1,40 @@
+# art-reference-hints.txt — keyword -> factual hint, one per line, "keyword:hint text".
+# art-handler.sh case-insensitively substring-matches each keyword against the customer's
+# prompt and appends any matched hints to the LLM's system prompt. This exists because a
+# small local model (litellm/Ollama-backed, no web knowledge beyond training) reliably
+# misses specific brand/mascot/franchise identities that claude gets right from broad
+# training knowledge (real example, 2026-08-16: "freebsd theme" -> local-mistral-small
+# picked generic blue with no bird emoji at all; claude correctly picked red + the FreeBSD
+# "Beastie" devil). Turning "does the model already know this" into "can the model use a
+# fact it's handed" closes most of that gap without depending on claude at all. Add more
+# lines as new gaps get reported -- keep each hint short (it's added to every matching
+# request's prompt) and factual (color/symbol/vibe, not full paragraphs).
+freebsd:the FreeBSD mascot is "Beastie", a red winged devil imp — favor a red/dark palette, a devil-face emoji, and BSD/daemon-flavored wording
+openbsd:OpenBSD's mascot is "Puffy", a pufferfish, often shown blowfish-yellow/tan
+netbsd:NetBSD's mascot is a flag-waving orange/tan daemon-flag creature
+linux:Linux's mascot is Tux, a black-and-white penguin — favor a penguin emoji and black/white/yellow-orange accents
+ubuntu:Ubuntu's brand color is a distinctive orange/aubergine, logo is three connected circles
+debian:Debian's mascot is a red swirl ("the swirl"), brand color deep red
+arch linux:Arch Linux's brand color is a bright cyan/blue
+fedora:Fedora's brand color is a deep blue
+windows:Microsoft Windows brand color is blue, logo is a four-pane flag/window
+macos:Apple/macOS brand is minimalist silver/white/black, apple silhouette
+docker:Docker's mascot is a blue whale carrying containers, brand color bright blue
+kubernetes:Kubernetes' mascot/logo is a blue steering-wheel/helm shape
+rust (the language):the Rust language's mascot is Ferris, an orange crab, brand color burnt orange/black
+python (the language):the Python language logo is intertwined blue and yellow snakes
+javascript:JavaScript's brand color is bright yellow with a black "JS" logo
+github:GitHub's mascot is Octocat (a cat with tentacles), brand is black/white with a purple accent
+git (the tool):Git's logo is an orange branching-diagram mark
+vim:Vim's logo is a green diamond-ish "OK" checkmark stone
+emacs:GNU Emacs' mascot is a purple/pink gnu (wildebeest) head
+postgres:PostgreSQL's mascot is "Slonik", a blue elephant
+mongodb:MongoDB's brand color is forest green, logo is a leaf
+redis:Redis's mascot is a red stack of cubes, brand color red
+dark souls:Dark Souls' visual identity is grim, dark, torch/bonfire-orange against near-black, punishing difficulty
+minecraft:Minecraft's identity is blocky pixel-art, grass green and dirt brown, creeper-green accents
+zelda:The Legend of Zelda's identity is forest green and heroic gold, the Triforce
+mario:Super Mario's identity is bright red overalls-blue, mushroom-kingdom cheerfulness
+pokemon:Pokémon's identity is Pikachu-yellow with red accents
+matrix:The Matrix's identity is black background with falling green code/glyphs
+among us:Among Us' identity is flat pastel crewmate colors on a dark spaceship backdrop
