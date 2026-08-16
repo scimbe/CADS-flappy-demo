@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Flappy Pipeline Studio — customize & generate your game</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23f7d51d' stroke='%23c9a80f'/%3E%3C/svg%3E">
+<!-- Favicon matches the classic in-game bird exactly (drawBird()'s fallback look: birdColor
+     circle + white eye-highlight + black pupil), not just a flat dot -- same proportions,
+     R=7 scaled from that function's R*0.35/R*0.3/R*0.32/R*0.45/R*0.15 offsets. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23f7d51d' stroke='%23c9a80f'/%3E%3Ccircle cx='10.5' cy='5.9' r='2.2' fill='%23fff'/%3E%3Ccircle cx='11.2' cy='5.9' r='1.1' fill='%23000'/%3E%3C/svg%3E">
 <style>
   /* ---- palette lifted from bunsenbrenner.org (the core CADS-Tunnel site) so this pipeline
      demo reads as part of the same family: navy/panel darks, warm amber "flame" accent,
