@@ -160,23 +160,60 @@ function serveSharedGame(id, res) {
 }
 
 const ROLE_CMD_TIMEOUT_MS = 60_000;
+// Role replies are small JSON fragments ({"ok":bool,"reason":str} etc.) - 1 MiB is enormously
+// generous. Without this, a misbehaving/compromised role command (or an attacker-influenced
+// prompt tricking one into echoing unbounded output) could grow this bridge process's memory
+// without limit; the ROLE_CMD_TIMEOUT_MS alone doesn't help since a fast pipe can write a lot
+// of data well within 60s.
+const MAX_CMD_OUTPUT_BYTES = 1024 * 1024;
 
 /** Run one role command with `input` on stdin. Non-zero exit / empty stdout / timeout -> reject. */
 function runCmd(cmd, input, timeoutMs = ROLE_CMD_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
-    const child = spawn("sh", ["-c", cmd], { stdio: ["pipe", "pipe", "pipe"] });
+    // `detached: true` makes `child` the leader of its own new process group (POSIX), so
+    // `killChildGroup` below can kill the whole group, not just the immediate `sh` PID. Found
+    // while writing MAX_CMD_OUTPUT_BYTES's own test: `sh -c "yes x"` on this system forks a
+    // real `yes` child rather than exec-replacing itself, so a plain `child.kill("SIGKILL")`
+    // only killed `sh`, leaving `yes` orphaned (reparented to pid 1) and still running/writing
+    // forever - the exact same latent gap already existed on the ROLE_CMD_TIMEOUT_MS path
+    // above, for any role command that forks rather than execs; this fixes both at once.
+    const child = spawn("sh", ["-c", cmd], { stdio: ["pipe", "pipe", "pipe"], detached: true });
+    const killChildGroup = () => {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // The group may already be gone (`sh` already exited on its own) - fall back to the
+        // plain PID so this never throws either way.
+        try { child.kill("SIGKILL"); } catch { /* already dead */ }
+      }
+    };
     let stdout = "";
     let stderr = "";
     let done = false;
     const timer = setTimeout(() => {
       if (done) return;
       done = true;
-      child.kill("SIGKILL");
+      killChildGroup();
       reject(new Error(`role command timed out after ${Math.round(timeoutMs / 1000)}s`));
     }, timeoutMs);
 
-    child.stdout.on("data", (d) => { stdout += d; });
-    child.stderr.on("data", (d) => { stderr += d; });
+    const failOversized = (which) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      killChildGroup();
+      reject(new Error(`role command ${which} exceeded ${MAX_CMD_OUTPUT_BYTES} bytes`));
+    };
+    child.stdout.on("data", (d) => {
+      if (done) return;
+      stdout += d;
+      if (stdout.length > MAX_CMD_OUTPUT_BYTES) failOversized("stdout");
+    });
+    child.stderr.on("data", (d) => {
+      if (done) return;
+      stderr += d;
+      if (stderr.length > MAX_CMD_OUTPUT_BYTES) failOversized("stderr");
+    });
     // Best-effort write, same as the Rust bridge: a role command that answers before draining
     // stdin makes this fail with EPIPE - deliberately ignored, the exit code + stdout decide.
     child.stdin.on("error", () => {});
@@ -407,18 +444,43 @@ async function runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmds, res) {
   });
 }
 
+// A game-prompt is a few sentences; 64 KiB is enormously generous. Without this, any client
+// (this is the bridge's own public POST endpoint, exposed straight to the browser/internet via
+// Caddy) could send an arbitrarily large request body and grow this process's memory without
+// limit - the same unbounded-read shape as MAX_CMD_OUTPUT_BYTES above, but directly
+// attacker-reachable rather than needing a misbehaving role command.
+const MAX_BODY_BYTES = 64 * 1024;
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
-    req.on("data", (d) => { body += d; });
+    let bytes = 0;
+    let done = false;
+    req.on("data", (d) => {
+      if (done) return;
+      bytes += d.length;
+      if (bytes > MAX_BODY_BYTES) {
+        done = true;
+        req.destroy();
+        reject(new Error(`request body exceeds ${MAX_BODY_BYTES} bytes`));
+        return;
+      }
+      body += d;
+    });
     req.on("end", () => {
+      if (done) return;
+      done = true;
       try {
         resolve(body ? JSON.parse(body) : {});
       } catch (e) {
         reject(e);
       }
     });
-    req.on("error", reject);
+    req.on("error", (e) => {
+      if (done) return;
+      done = true;
+      reject(e);
+    });
   });
 }
 
@@ -505,7 +567,7 @@ module.exports = {
   candidateLabel,
   demoAuction,
   assembleConfig,
-  runCrewStreaming,
+  readJsonBody,
   buildHandler,
   requestListener,
   incrementPromptCount,
@@ -513,4 +575,7 @@ module.exports = {
   isValidSharedGameId,
   shareHandler,
   serveSharedGame,
+  runCrewStreaming,
+  MAX_BODY_BYTES,
+  MAX_CMD_OUTPUT_BYTES,
 };
