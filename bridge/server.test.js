@@ -135,3 +135,47 @@ async function collect(safety, physicsCmds, art) {
   await mod.runCrewStreaming("test prompt", safety, physicsCmds, art, fakeRes);
   return chunks.join("").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 }
+
+test("runCmd: a role command writing more than MAX_CMD_OUTPUT_BYTES to stdout is killed and rejected, not buffered without limit", async () => {
+  // A role command that just keeps writing -- the real hazard this closes: a misbehaving or
+  // compromised role command (or a runaway loop) growing this bridge process's memory without
+  // limit. `yes` writes forever; if the bound didn't work this would hang. Outer guard: `sh -c
+  // "yes x"` forks a REAL child on this system rather than exec-replacing itself, so an earlier
+  // version of this fix (killing only the tracked `sh` pid) orphaned `yes` and it kept running
+  // forever even after the promise rejected correctly -- this timeout would have caught that too.
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("runCmd did not reject within 5s")), 5000));
+  await Promise.race([assert.rejects(() => mod.runCmd("yes x", ""), /stdout exceeded/), timeout]);
+});
+
+test("runCmd: normal, well-under-the-limit output still works", async () => {
+  const out = await mod.runCmd("printf hello", "");
+  assert.equal(out, "hello");
+});
+
+test("readJsonBody: a request body over MAX_BODY_BYTES is rejected and the stream is destroyed, not buffered without limit", async () => {
+  const { EventEmitter } = require("node:events");
+  const req = new EventEmitter();
+  let destroyed = false;
+  req.destroy = () => { destroyed = true; };
+
+  const promise = mod.readJsonBody(req);
+  // One chunk already over the limit -- the real attacker-reachable case: this is the bridge's
+  // own public POST endpoint, exposed straight to the browser/internet via Caddy.
+  req.emit("data", Buffer.alloc(mod.MAX_BODY_BYTES + 1, "x"));
+
+  await assert.rejects(promise, /exceeds .* bytes/);
+  assert.ok(destroyed, "the oversized request stream must be destroyed, not left to keep sending");
+});
+
+test("readJsonBody: a normal, well-under-the-limit body still parses", async () => {
+  const { EventEmitter } = require("node:events");
+  const req = new EventEmitter();
+  req.destroy = () => {};
+
+  const promise = mod.readJsonBody(req);
+  req.emit("data", Buffer.from('{"prompt":"a tiny flappy game"}'));
+  req.emit("end");
+
+  const body = await promise;
+  assert.deepEqual(body, { prompt: "a tiny flappy game" });
+});
