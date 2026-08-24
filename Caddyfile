@@ -2,22 +2,35 @@
 # help.bunsenbrenner.org demo (examples/help-site): Caddy terminates TLS, so
 # it needs NO inbound :80/:443 of its own. The Browser-Plane agent forwards
 # the raw TLS here; TLS terminates at this origin, keeping the edge/plane
-# payload-blind.
+# payload-blind. auto_https is off since the cert below is CORE-issued
+# (deSEC DNS-01), not something Caddy should try to obtain itself.
 #
 # #219: the cert is issued CORE-side (scripts/authorize-pipeline.sh, deSEC
 # DNS-01 with the operator's zone-wide token) and mounted in as static files
-# — this Caddyfile only ever reads fullchain.pem/privkey.pem, never holds a
-# DNS credential of its own.
+# under /data/acme-certs — this Caddyfile only ever reads
+# fullchain.pem/privkey.pem, never holds a DNS credential of its own.
+{
+	auto_https off
+}
 
 flappy-demo.bunsenbrenner.org {
+	tls /data/acme-certs/fullchain.pem /data/acme-certs/privkey.pem
 	# #173 distributed crew: the studio page POSTs its prompt here; the crew bridge runs the
-	# safety→physics→art crew over the tunnel and returns {safety, auction, config}. A more
-	# specific matcher than the file_server below, so Caddy routes it first.
+	# safety→physics→art crew over the tunnel and returns {safety, auction, config}. More
+	# specific matchers than the file_server below, so Caddy routes them first.
 	reverse_proxy /crew/build flappy-crew-bridge:8788
+	reverse_proxy /crew/count flappy-crew-bridge:8788
+	# Hosted shared-game pastebin (POST /share -> GET /g/:uuid) so a shared link opens directly
+	# into the game instead of a raw file attachment.
+	reverse_proxy /share flappy-crew-bridge:8788
+	reverse_proxy /g/* flappy-crew-bridge:8788
+	handle_path /agent-cards/* {
+		root * /data/agent-cards
+		file_server
+	}
 	root * /srv
 	file_server
 	encode gzip
-	tls /certs/fullchain.pem /certs/privkey.pem
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
