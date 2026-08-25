@@ -11,7 +11,22 @@
 # On any LLM/parse failure this FAILS CLOSED (ok=false) — a safety gate must never fail open.
 set -uo pipefail
 REQ_ID="$$-$(date -u +%s)-$RANDOM"
-log() { printf '[%s] handler=safety_check(flappy) req=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REQ_ID" "$*" | tee -a "${CT_HANDLER_LOG_DIR:-/home/becke/workflow-pipelines/.demo-checkouts/handler-logs}/safety-check-flappy.log" >&2; }
+# Live-found 2026-08-25: this always tried to tee into CT_HANDLER_LOG_DIR's default, a HOST
+# path (/home/becke/...) that only ever exists on the host running this script directly --
+# inside the actual deployed container (no CT_HANDLER_LOG_DIR set, no such directory mounted)
+# that path doesn't exist at all, so EVERY invocation's log line silently vanished with no
+# error surfaced anywhere. A real user-reported rejection was then completely unexplainable
+# after the fact -- no server-side record of what was actually classified or why. stderr
+# (always captured by `docker logs`) is now unconditional and independent of the file target;
+# the file tee is now best-effort and skipped entirely if the directory isn't there, instead of
+# both silently failing together.
+LOG_DIR="${CT_HANDLER_LOG_DIR:-/home/becke/workflow-pipelines/.demo-checkouts/handler-logs}"
+log() {
+  local line
+  line="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] handler=safety_check(flappy) req=${REQ_ID} $*"
+  printf '%s\n' "$line" >&2
+  [ -d "$LOG_DIR" ] && printf '%s\n' "$line" >>"$LOG_DIR/safety-check-flappy.log" 2>/dev/null
+}
 
 # #231: was 30s (physics/art already use 45s). Live-measured 2026-08-16 against the shared
 # litellm instance: 1/20 calls hit exactly this timeout under normal shared-GPU contention

@@ -32,7 +32,17 @@ fi
 # Never logs prompt content or any credential/key material, only shape + timing + outcome,
 # so this is safe to leave on in production and useful for on-call debugging.
 REQ_ID="$$-$(date -u +%s)-$RANDOM"
-log() { printf "[%s] handler=physics req=%s %s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REQ_ID" "$*" | tee -a "${CT_HANDLER_LOG_DIR:-/home/becke/workflow-pipelines/.demo-checkouts/handler-logs}/physics.log" >&2; }
+# Same fix as safety-check-handler.sh (2026-08-25): the tee target's default is a HOST path
+# that doesn't exist inside the actual deployed container, so it silently swallowed every log
+# line unless the file write and the stderr write both went through together -- stderr is now
+# unconditional, the file tee is best-effort only when its directory actually exists.
+LOG_DIR="${CT_HANDLER_LOG_DIR:-/home/becke/workflow-pipelines/.demo-checkouts/handler-logs}"
+log() {
+  local line
+  line="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] handler=physics req=${REQ_ID} $*"
+  printf '%s\n' "$line" >&2
+  [ -d "$LOG_DIR" ] && printf '%s\n' "$line" >>"$LOG_DIR/physics.log" 2>/dev/null
+}
 
 # A hung `claude -p` call (network blip, rate limit, etc.) would otherwise block this serve
 # slot FOREVER — ct-agent's --serve pool is finite (8 concurrent sessions), so a handful of
