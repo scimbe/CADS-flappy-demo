@@ -68,6 +68,15 @@ log "starting the 3 role-serve containers via start-crew-serve.sh"
 # theme" -> claude correctly picks the red "Beastie" devil association, local-mistral-small
 # just picks generic blue/no-emoji). physics/safety_check stayed on litellm without a
 # reported regression -- see start-crew-serve.sh's own header for the full account.
+#
+# CLAUDE_BIN_PATH is pinned explicitly (not left to serve-role-container.sh's own
+# `command -v claude` fallback) because this script runs from cron's @reboot context,
+# which does not source the interactive shell's PATH -- confirmed live 2026-08-26: two
+# reboots in a row (2026-08-14, 2026-08-26) left flappy-art-serve and flappy-safety-serve
+# never even attempted, because art's `claude CLI not resolvable` death under set -euo
+# pipefail aborted start-crew-serve.sh's role loop before it reached safety. physics
+# always looked fine (it's first in the loop and doesn't need claude at all, LLM-shimmed),
+# which made this easy to miss without checking `docker ps` for all three role names.
 ENV_FILE="$(pwd)/.env.crew-serve" \
 CT_TUNNEL_SRC=/home/becke/workflow-pipelines/.demo-checkouts/CADS-Tunnel \
 CT_AGENT_EDGE_BROKER=57.131.133.91:4435 \
@@ -76,6 +85,7 @@ DOCKER_NETWORK=flappy-demo_default \
 LLM_SHIM_HOST="$(pwd)/litellm-shim.sh" \
 LLM_ENV_FILE="$(pwd)/.local-operator/litellm.env" \
 LLM_SHIM_DISABLED_ROLES="art" \
+CLAUDE_BIN_PATH="/home/becke/.local/bin/claude" \
   ./start-crew-serve.sh || log "start-crew-serve.sh failed -- role-serve containers may already exist from a prior run; check 'docker ps | grep flappy-.*-serve'"
 
 log "done"
