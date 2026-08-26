@@ -40,7 +40,7 @@ RUN apt-get update \
 # what the flappy-crew-bridge's role dials needed the whole time -- physics/art losing every
 # admission race to standby was this exact deadlock. Keep in sync with Agent.Dockerfile's own
 # CT_AGENT_REF.
-ARG CT_AGENT_REF=dc13b5a0ebe9715f5b3a58318b68a9ac1ce7d5bd
+ARG CT_AGENT_REF=738502252eba6763c6d2c6407d06b28d3174d15e
 RUN git clone https://github.com/scimbe/ct-agent.git /build && cd /build && git checkout "${CT_AGENT_REF}"
 WORKDIR /build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
