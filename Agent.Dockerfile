@@ -59,8 +59,26 @@ RUN apt-get update \
 # This is the fix that should finally make flappy-demo's physics/art roles
 # stop losing every admission race to the central (standby) fallback. Keep in
 # sync with bridge/Dockerfile's own CT_AGENT_REF.
-ARG CT_AGENT_REF=738502252eba6763c6d2c6407d06b28d3174d15e
-RUN git clone https://github.com/scimbe/ct-agent.git /build && cd /build && git checkout "${CT_AGENT_REF}"
+#
+# Bumped again 2026-09-02 to v0.7.22 (operator directive: comprehensive
+# host-wide ct-agent update, overriding the earlier 2026-08-24 deliberate
+# deferral of this specific pin -- flappy-demo has no bump-ct-agent.yml CI
+# safety net, so this needs extra manual admission-behavior verification
+# post-deploy, not just "container is up").
+ARG CT_AGENT_REF=a3d33f8b68aeafc3b53646a7ccd183c4ba807585
+# Optional gh-token secret (--secret id=gh_token,src=<file>): GitHub's anonymous
+# git-clone rate limit for this host's IP was hit 2026-09-02 (same fix already
+# applied to CADS-cookbook-demo/CADS-DEMO-deutschlandatlas-callcenter/
+# CADS-webconference-demo/CADS-a2a-demo/CADS-auction-demo). Falls back to a
+# plain anonymous clone when no secret is passed, so this is a no-op for
+# anyone building without a token.
+RUN --mount=type=secret,id=gh_token \
+    if [ -s /run/secrets/gh_token ]; then \
+      git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x:%s' "$(cat /run/secrets/gh_token)" | base64 -w0)" clone https://github.com/scimbe/ct-agent.git /build; \
+    else \
+      git clone https://github.com/scimbe/ct-agent.git /build; \
+    fi \
+    && cd /build && git checkout "${CT_AGENT_REF}"
 WORKDIR /build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
