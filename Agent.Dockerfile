@@ -65,7 +65,7 @@ RUN apt-get update \
 # deferral of this specific pin -- flappy-demo has no bump-ct-agent.yml CI
 # safety net, so this needs extra manual admission-behavior verification
 # post-deploy, not just "container is up").
-ARG CT_AGENT_REF=a3d33f8b68aeafc3b53646a7ccd183c4ba807585
+ARG CT_AGENT_REF=c27e9aee8465c6605df98bd7268cc419e3c484a1
 # Optional gh-token secret (--secret id=gh_token,src=<file>): GitHub's anonymous
 # git-clone rate limit for this host's IP was hit 2026-09-02 (same fix already
 # applied to CADS-cookbook-demo/CADS-DEMO-deutschlandatlas-callcenter/

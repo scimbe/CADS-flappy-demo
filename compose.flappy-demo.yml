@@ -50,7 +50,7 @@ services:
         # Bumped 2026-08-14 to v0.4.16 -- THE actual #494 root cause (rendezvous-ack-reader
         # deadlock on fresh :443 pairings). See Agent.Dockerfile's own comment for the full
         # history and mechanism.
-        - CT_AGENT_REF=${CT_AGENT_REF:-a3d33f8b68aeafc3b53646a7ccd183c4ba807585}
+        - CT_AGENT_REF=${CT_AGENT_REF:-c27e9aee8465c6605df98bd7268cc419e3c484a1}
     environment:
       - CT_AGENT_MODE=browser
       - CT_AGENT_HOSTNAME=flappy-demo.bunsenbrenner.org

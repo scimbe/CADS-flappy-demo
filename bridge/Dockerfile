@@ -40,7 +40,7 @@ RUN apt-get update \
 # what the flappy-crew-bridge's role dials needed the whole time -- physics/art losing every
 # admission race to standby was this exact deadlock. Keep in sync with Agent.Dockerfile's own
 # CT_AGENT_REF.
-ARG CT_AGENT_REF=a3d33f8b68aeafc3b53646a7ccd183c4ba807585
+ARG CT_AGENT_REF=c27e9aee8465c6605df98bd7268cc419e3c484a1
 # Optional gh-token secret (--secret id=gh_token,src=<file>): GitHub's anonymous
 # git-clone rate limit for this host's IP was hit 2026-09-02 (same fix already
 # applied to CADS-cookbook-demo/CADS-DEMO-deutschlandatlas-callcenter/
