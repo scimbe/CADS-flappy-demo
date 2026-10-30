@@ -20,6 +20,7 @@ flappy-demo.bunsenbrenner.org {
 	# specific matchers than the file_server below, so Caddy routes them first.
 	reverse_proxy /crew/build flappy-crew-bridge:8788
 	reverse_proxy /crew/count flappy-crew-bridge:8788
+	reverse_proxy /crew/status flappy-crew-bridge:8788
 	# Hosted shared-game pastebin (POST /share -> GET /g/:uuid) so a shared link opens directly
 	# into the game instead of a raw file attachment.
 	reverse_proxy /share flappy-crew-bridge:8788

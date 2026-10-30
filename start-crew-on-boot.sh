@@ -63,11 +63,10 @@ log "starting the 3 role-serve containers via start-crew-serve.sh"
 # real prompts, see .local-operator/litellm.env) -- unset both here to roll every role back
 # to the bind-mounted claude CLI, byte-identical to before this existed.
 #
-# art is force-excluded (LLM_SHIM_DISABLED_ROLES): live use surfaced a real quality gap on
-# niche/knowledge-heavy prompts the pre-rollout A/B harness never covered (e.g. "freebsd
-# theme" -> claude correctly picks the red "Beastie" devil association, local-mistral-small
-# just picks generic blue/no-emoji). physics/safety_check stayed on litellm without a
-# reported regression -- see start-crew-serve.sh's own header for the full account.
+# art was force-excluded from litellm until 2026-10-30 over niche prompts ("freebsd theme").
+# handlers/art-reference-hints.txt (#230) closes that gap, and the bind-mounted claude CLI had
+# become the worse option: the art role returned its default fragment for every prompt, so no
+# prompt changed the game. Set LLM_SHIM_DISABLED_ROLES="art" to go back to the CLI.
 #
 # CLAUDE_BIN_PATH is pinned explicitly (not left to serve-role-container.sh's own
 # `command -v claude` fallback) because this script runs from cron's @reboot context,
@@ -84,7 +83,7 @@ CT_AGENT_EDGE_RELAY=57.131.133.91:4436 \
 DOCKER_NETWORK=flappy-demo_default \
 LLM_SHIM_HOST="$(pwd)/litellm-shim.sh" \
 LLM_ENV_FILE="$(pwd)/.local-operator/litellm.env" \
-LLM_SHIM_DISABLED_ROLES="art" \
+LLM_SHIM_DISABLED_ROLES="" \
 CLAUDE_BIN_PATH="/home/becke/.local/bin/claude" \
   ./start-crew-serve.sh || log "start-crew-serve.sh failed -- role-serve containers may already exist from a prior run; check 'docker ps | grep flappy-.*-serve'"
 

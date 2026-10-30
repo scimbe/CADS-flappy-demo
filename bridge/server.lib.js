@@ -24,12 +24,13 @@
  *   CREW_PHYSICS_CMD_2, _3, ... - ordered failover candidates (#207 Slice A), contiguous from _2
  *   CREW_ART_CMD       - stdin=prompt -> stdout {theme,birdColor,birdEmoji,title,palette?,pipeEmoji?,bgEffect?}
  *   CREW_ART_CMD_2, _3, ... - ordered failover candidates (#207 Slice A), contiguous from _2, same as physics
+ *   GET /crew/status   - {lastBuild:{outcome:"built"|"failed",at,role?}|null}, drives the live badge
  *   CREW_BRIDGE_LISTEN - default 0.0.0.0:8788
  *   CREW_PROMPT_COUNT_FILE - default ./prompt-count.json; global counter of successful builds (GET /crew/count)
  *
  * Fail-closed: safety runs first and {ok:false} short-circuits to a rejection (no fragment
- * calls); a role command failing/malformed output -> a terminal {stage:"error"} event, so the
- * browser falls back to its local stand-in.
+ * calls); a role command failing, reporting {error}, or returning the placeholder fragment ->
+ * a terminal {stage:"error"} event. Only a build with real fragments counts as "built".
  */
 
 const { spawn } = require("child_process");
@@ -70,6 +71,17 @@ function incrementPromptCount() {
 }
 function getPromptCount() {
   return promptCount;
+}
+
+// What the "live crew" badge is allowed to claim: the outcome of the most recent real attempt,
+// not a hard-coded label. Safety rejections say nothing about physics/art and do not change it.
+let lastBuild = null;
+function recordBuildOutcome(outcome, role) {
+  lastBuild = { outcome, at: new Date().toISOString() };
+  if (role) lastBuild.role = role;
+}
+function getLastBuild() {
+  return lastBuild;
 }
 
 // #232, operator request: sharing should hand recipients a real, tappable link, not just a
@@ -264,7 +276,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * short-backoff version. Exponential backoff with jitter, capped and given enough total attempts
  * to plausibly outlast one other concurrent call, is the actual fix.
  */
-async function runCmdWithRetries(cmd, input, maxAttempts) {
+async function runCmdWithRetries(cmd, input, maxAttempts, validate) {
   const BASE_MS = 500;
   const CAP_MS = 4000;
   let lastErr = new Error("no attempts made");
@@ -274,8 +286,11 @@ async function runCmdWithRetries(cmd, input, maxAttempts) {
       await sleep(delay + Math.floor(Math.random() * delay * 0.5));
     }
     try {
-      return await runCmd(cmd, input);
+      const out = await runCmd(cmd, input);
+      if (validate) validate(out);
+      return out;
     } catch (e) {
+      if (e.noRetry) throw e;
       lastErr = e;
     }
   }
@@ -294,13 +309,13 @@ function runCmdAsync(cmd, input) {
  * the full backoff-retry budget (nowhere further to go, worth paying the retry cost). Returns
  * [output, winningIndex] so the caller can report who actually served the request.
  */
-async function runWithFallbacks(candidates, input) {
+async function runWithFallbacks(candidates, input, validate) {
   const lastIndex = candidates.length - 1;
   let lastErr = new Error("no role command configured");
   for (let i = 0; i < candidates.length; i++) {
     const attempts = i === lastIndex ? 5 : 1;
     try {
-      const out = await runCmdWithRetries(candidates[i], input, attempts);
+      const out = await runCmdWithRetries(candidates[i], input, attempts, validate);
       return [out, i];
     } catch (e) {
       if (candidates.length > 1) {
@@ -329,11 +344,45 @@ function candidateLabel(primary, standby, winningIndex) {
   return winningIndex === 0 ? primary : standby;
 }
 
-/** The visible auction for the demo crew (mirrors ct_common::crew's demo_auction). */
-function demoAuction(physicsWho, artWho) {
+/** Default fragment older art handlers print when their LLM call failed. */
+const PLACEHOLDER_ART = { theme: "day", birdColor: "#f7d51d", birdEmoji: "", title: "My Flappy Bird" };
+
+/**
+ * Rejects a role reply that carries no generated content, so it counts as a failed candidate
+ * (the next candidate is tried, no retry on the same one: its LLM already answered). Handlers
+ * report {error,...}; the placeholder check also catches handlers not yet redeployed, which
+ * are bind-mounted from a checkout and can lag behind this bridge.
+ */
+function assertRealFragment(out) {
+  let d;
+  try {
+    d = JSON.parse(out);
+  } catch {
+    return; // malformed output is assembleConfig's job
+  }
+  if (!d || typeof d !== "object") return;
+  let why = null;
+  if (d.error) why = `${d.error} (llm_status=${d.llm_status}): ${d.detail || "no detail"}`;
+  else if (Object.keys(PLACEHOLDER_ART).every((k) => d[k] === PLACEHOLDER_ART[k]) && !d.palette) {
+    why = "placeholder art fragment";
+  }
+  if (why) {
+    const e = new Error(why);
+    e.noRetry = true;
+    throw e;
+  }
+}
+
+function fragmentModel(json) {
+  const m = JSON.parse(json)._model;
+  return typeof m === "string" && /^[\w.:\/-]{1,60}$/.test(m) ? m : "unknown";
+}
+
+/** Who served each role. One candidate per role, no competing offers: units/price are fixed labels. */
+function demoAuction(physicsWho, artWho, physicsModel = "unknown", artModel = "unknown") {
   return [
-    { role: "physics", bids: [{ who: physicsWho, model: "claude", units: 20, price: 50, win: true }] },
-    { role: "art", bids: [{ who: artWho, model: "claude", units: 20, price: 40, win: true }] },
+    { role: "physics", bids: [{ who: physicsWho, model: physicsModel, units: 20, price: 50, win: true }] },
+    { role: "art", bids: [{ who: artWho, model: artModel, units: 20, price: 40, win: true }] },
   ];
 }
 
@@ -347,6 +396,7 @@ function assembleConfig(physicsJson, artJson) {
   const art = JSON.parse(artJson);
   for (const k of ["gravity", "flapPower", "pipeGap", "pipeSpeed"]) {
     if (physics[k] === undefined) throw new Error(`physics fragment missing "${k}"`);
+    if (!Number.isFinite(physics[k])) throw new Error(`physics fragment "${k}" is not a number`);
   }
   for (const k of ["theme", "birdColor", "birdEmoji", "title"]) {
     if (art[k] === undefined) throw new Error(`art fragment missing "${k}"`);
@@ -409,19 +459,21 @@ async function runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmds, res) {
 
   emit(res, { stage: "physics", status: "start" });
   emit(res, { stage: "art", status: "start" });
-  const physicsP = runWithFallbacks(physicsCmds, prompt).then(
+  const physicsP = runWithFallbacks(physicsCmds, prompt, assertRealFragment).then(
     (r) => { emit(res, { stage: "physics", status: "done" }); return r; }
   );
-  const artP = runWithFallbacks(artCmds, prompt).then(
+  const artP = runWithFallbacks(artCmds, prompt, assertRealFragment).then(
     (r) => { emit(res, { stage: "art", status: "done" }); return r; }
   );
   const [physicsResult, artResult] = await Promise.allSettled([physicsP, artP]);
 
-  if (physicsResult.status === "rejected") {
-    return emit(res, { stage: "error", message: `physics role unreachable: ${physicsResult.reason.message}` });
-  }
-  if (artResult.status === "rejected") {
-    return emit(res, { stage: "error", message: `art role unreachable: ${artResult.reason.message}` });
+  for (const [role, result] of [["physics", physicsResult], ["art", artResult]]) {
+    if (result.status === "rejected") {
+      // Details stay in the log: they can hold internals of the role command.
+      process.stderr.write(`flappy-crew-bridge: ${role} role failed: ${result.reason.message}\n`);
+      recordBuildOutcome("failed", role);
+      return emit(res, { stage: "error", role, message: `${role} role produced no result` });
+    }
   }
   const [physicsOut, physicsWinner] = physicsResult.value;
   const [artOut, artWinner] = artResult.value;
@@ -430,16 +482,18 @@ async function runCrewStreaming(prompt, safetyCmd, physicsCmds, artCmds, res) {
   try {
     cfg = assembleConfig(physicsOut, artOut);
   } catch (e) {
+    recordBuildOutcome("failed");
     return emit(res, { stage: "error", message: `crew fragments malformed: ${e.message}` });
   }
 
   const physicsWho = candidateLabel("source-2", "central (standby)", physicsWinner);
   const artWho = candidateLabel("sink", "central (standby)", artWinner);
   incrementPromptCount();
+  recordBuildOutcome("built");
   emit(res, {
     stage: "built",
     safety: { ok: true, reason: "" },
-    auction: demoAuction(physicsWho, artWho),
+    auction: demoAuction(physicsWho, artWho, fragmentModel(physicsOut), fragmentModel(artOut)),
     config: cfg,
   });
 }
@@ -539,6 +593,11 @@ function requestListener(req, res) {
     res.end(JSON.stringify({ count: promptCount }));
     return;
   }
+  if (req.method === "GET" && req.url === "/crew/status") {
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ lastBuild }));
+    return;
+  }
   if (req.method === "POST" && req.url === "/share") {
     shareHandler(req, res).catch((e) => {
       try {
@@ -572,6 +631,8 @@ module.exports = {
   requestListener,
   incrementPromptCount,
   getPromptCount,
+  getLastBuild,
+  assertRealFragment,
   isValidSharedGameId,
   shareHandler,
   serveSharedGame,
