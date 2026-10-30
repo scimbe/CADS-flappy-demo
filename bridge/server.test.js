@@ -235,3 +235,86 @@ test("readJsonBody: a normal, well-under-the-limit body still parses", async () 
   const body = await promise;
   assert.deepEqual(body, { prompt: "a tiny flappy game" });
 });
+
+// ---- a failed role must never look like a build (flappy "harvester market": UI said built, game unchanged)
+const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+
+const defaultArt = '{"theme":"day","birdColor":"#f7d51d","birdEmoji":"","title":"My Flappy Bird"}';
+const realArt = '{"theme":"night","birdColor":"#112233","birdEmoji":"x","title":"Octo","_model":"m1"}';
+const realPhysics = '{"gravity":2000,"flapPower":400,"pipeGap":100,"pipeSpeed":200,"_model":"m2"}';
+const quoted = (json) => `printf '%s' '${json}'`;
+
+async function runCrew(physicsCmds, artCmds) {
+  const lines = [];
+  const res = { write: (l) => lines.push(JSON.parse(l)), destroyed: false, writableEnded: false };
+  await mod.runCrewStreaming("a prompt", quoted('{"ok":true,"reason":""}'), physicsCmds, artCmds, res);
+  return lines.at(-1);
+}
+
+test("crew: art placeholder fragment is an error, not a build, and does not count", async () => {
+  const before = mod.getPromptCount();
+  const term = await runCrew([quoted(realPhysics)], [quoted(defaultArt)]);
+  assert.equal(term.stage, "error");
+  assert.equal(term.role, "art");
+  assert.equal(mod.getPromptCount(), before);
+  assert.equal(mod.getLastBuild().outcome, "failed");
+});
+
+test("crew: handler {error} fails over to the standby instead of ending the build", async () => {
+  const term = await runCrew([quoted(realPhysics)], [quoted('{"error":"llm_failed"}'), quoted(realArt)]);
+  assert.equal(term.stage, "built");
+  assert.equal(term.auction[1].bids[0].who, "central (standby)");
+});
+
+test("crew: built event reports the models the handlers really used", async () => {
+  const before = mod.getPromptCount();
+  const term = await runCrew([quoted(realPhysics)], [quoted(realArt)]);
+  assert.equal(term.auction[0].bids[0].model, "m2");
+  assert.equal(term.auction[1].bids[0].model, "m1");
+  assert.equal(mod.getPromptCount(), before + 1);
+  assert.equal(mod.getLastBuild().outcome, "built");
+});
+
+test("crew: a non-numeric physics value is rejected", () => {
+  assert.throws(() => mod.assembleConfig('{"gravity":"hard","flapPower":1,"pipeGap":1,"pipeSpeed":1}', realArt));
+});
+
+for (const [script, marker] of [["physics-handler.sh", "gravity"], ["art-handler.sh", "theme"]]) {
+  test(`${script}: a failing LLM is reported, never replaced by default values`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "handler-"));
+    // Own `timeout` so the test also runs where coreutils lacks it (macOS).
+    fs.writeFileSync(path.join(dir, "timeout"), '#!/bin/sh\nshift\nexec "$@"\n', { mode: 0o755 });
+    const llm = path.join(dir, "llm");
+    fs.writeFileSync(llm, "#!/bin/sh\necho 'token expired' >&2\nexit 1\n", { mode: 0o755 });
+    const out = execFileSync("bash", [path.join(__dirname, "..", "handlers", script)], {
+      input: "harvester market", stdio: ["pipe", "pipe", "ignore"],
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CT_LLM_CMD: llm, CT_HANDLER_LOG_DIR: "/nonexistent" },
+    }).toString();
+    const reply = JSON.parse(out);
+    assert.equal(reply[marker], undefined);
+    assert.equal(reply.error, "llm_failed");
+    assert.match(reply.detail, /token expired/);
+  });
+
+  test(`${script}: a real LLM reply is passed on, tagged with its model`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "handler-"));
+    fs.writeFileSync(path.join(dir, "timeout"), '#!/bin/sh\nshift\nexec "$@"\n', { mode: 0o755 });
+    const llm = path.join(dir, "llm");
+    const reply = script.startsWith("physics") ? realPhysics : realArt;
+    fs.writeFileSync(llm, `#!/bin/sh\nprintf '%s' '${reply}'\n`, { mode: 0o755 });
+    const out = execFileSync("bash", [path.join(__dirname, "..", "handlers", script)], {
+      input: "x", stdio: ["pipe", "pipe", "ignore"],
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CT_LLM_CMD: llm, CT_HANDLER_LOG_DIR: "/nonexistent", LITELLM_MODEL: "tagged-model" },
+    }).toString();
+    assert.equal(JSON.parse(out)._model, "tagged-model");
+    assert.notEqual(JSON.parse(out)[marker], undefined);
+  });
+}
+
+test("studio page: no fabricated bidders and no fixed live badge", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  assert.doesNotMatch(html, /local-llama-70b|mixtral-8x7b|renderAuction/);
+  assert.doesNotMatch(html, /<i><\/i> live crew/);
+});

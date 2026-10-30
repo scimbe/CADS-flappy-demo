@@ -285,7 +285,7 @@
     </div>
     <div class="spacer"></div>
     <span class="live-pill" id="promptCounterPill" title="Games built by everyone, across all visitors" hidden>🎮 <span id="promptCountVal">–</span> games built</span>
-    <span class="live-pill"><i></i> live crew</span>
+    <span class="live-pill" id="crewPill" title="Result of the most recent crew build"><i></i> <span id="crewPillText">checking crew…</span></span>
     <button class="btn info" id="infoBtn" title="How does this work?">ⓘ Info</button>
   </header>
 
@@ -454,9 +454,8 @@
         does its best with a small set of built-in hints, but it isn't a giant frontier model.</p>
       <p style="margin-top:8px"><b>Prompt it.</b> Describe a game in the prompt box and the crew builds it — but the
         prompt is <b>safety-guarded</b> first: it must read as a game change, not an <i>anti-prompt</i> trying to
-        subvert the system (those are rejected and your current game kept). The build screen shows the
-        <b>marketplace live</b>: candidate agents bid their idle LLM capacity, the <b>auction clears</b> to the best
-        offer, and you see <b>which LLM was chosen</b> per role. Keep prompting to refine, or download anytime.</p></div></div>
+        subvert the system (those are rejected and your current game kept). The build screen shows each
+        role live and <b>which agent and LLM really served it</b>; if a role fails, the page says so. Keep prompting to refine, or download anytime.</p></div></div>
 
     <div class="step"><div class="n">🔒</div><div>
       <h3>Access &amp; hosting</h3>
@@ -1093,69 +1092,11 @@ function interpretPrompt(p) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// The marketplace: per role, candidate provider agents bid their idle LLM capacity
-// (#147 CapacityOffer/Bid); the auction clears to the best offer and that agent's LLM
-// is chosen. sink + source-2 + central are the real crew (#169); the rest are plausible
-// competing bidders so the selection is visible. (MVP figures until the live plane runs.)
-const CREW_AUCTION = {
-  physics: [
-    { who: "source-2", model: "claude-sonnet-5", units: 20, price: 50, win: true },
-    { who: "agent-β", model: "local-llama-70b", units: 20, price: 66 },
-  ],
-  art: [
-    { who: "sink", model: "claude-opus-4-8", units: 15, price: 40, win: true },
-    { who: "agent-γ", model: "mixtral-8x7b", units: 15, price: 58 },
-  ],
-  integration: [
-    { who: "central", model: "claude-opus-4-8", units: 10, price: 30, win: true },
-  ],
-};
 function feedLine(cls, html) {
   const d = document.createElement("div");
   d.className = cls; d.innerHTML = html;
   $("auctionFeed").appendChild(d); $("auctionFeed").scrollTop = 1e9;
 }
-async function renderAuction(role, icon, bids) {
-  bids = bids || CREW_AUCTION[role];
-  feedLine("abid", icon + " <b>" + role + "</b> — auction open (" + bids.length + " offer" + (bids.length > 1 ? "s" : "") + ")");
-  for (const b of bids) {
-    await sleep(150);
-    feedLine("abid", "&nbsp;&nbsp;bid <span class='who'>" + b.who + "</span> · " + b.units + "u @ " + b.price + " · " + b.model);
-  }
-  const w = bids.find((b) => b.win) || bids[0];
-  await sleep(230);
-  feedLine("awin", "&nbsp;&nbsp;✓ cleared → <span class='who'>" + w.who + "</span> @ " + w.price + " · LLM chosen: " + w.model);
-  return w;
-}
-
-// runBuild animates the crew + auction. Pass a live {role: bids[]} map to show the REAL
-// marketplace (from the crew bridge); omit it to show the local stand-in. `applyThen` runs
-// AFTER the animation (the live path applies the crew's real config there).
-async function runBuild(bidsByRole, applyThen) {
-  const members = [...document.querySelectorAll(".crew .member")];
-  const steps = [["physics", 34, "🕹️", 2], ["art", 70, "🎨", 3], ["integration", 100, "🧩", 4]];
-  $("build").style.display = "flex";
-  $("buildBar").style.width = "0%";
-  $("auctionFeed").innerHTML = "";
-  members.forEach((m) => m.classList.remove("active", "done"));
-  setFlowStage(1, true, "safety checked (offline)");
-  for (const [role, pct, icon, flowIdx] of steps) {
-    const el = members.find((m) => m.dataset.role === role);
-    el.classList.add("active");
-    setFlowStage(flowIdx, true, role + " producing…");
-    const w = await renderAuction(role, icon, bidsByRole && bidsByRole[role]);
-    $("buildStep").textContent = icon + " " + w.who + " (" + w.model + ") is producing the " + role + " part…";
-    await sleep(480);
-    $("buildBar").style.width = pct + "%";
-    el.classList.remove("active"); el.classList.add("done");
-  }
-  setFlowStage(FLOW_LABELS.length - 1, false, "delivered");
-  if (applyThen) applyThen();
-  startPreview();
-  await sleep(320);
-  $("build").style.display = "none";
-}
-
 // ---- live crew bridge (#171): the browser can't speak the QUIC/Noise channel, so it POSTs
 // the prompt to a small HTTP bridge on the plane that runs the real safety_check + per-role
 // matches + handlers and returns {safety, auction, config}. Configurable via an optional
@@ -1211,6 +1152,24 @@ async function liveBuildStream(prompt, onEvent) {
     return terminal;
   } finally { clearTimeout(to); }
 }
+// The badge states what the bridge last observed, never a fixed "live".
+function setCrewPill(last) {
+  const t = $("crewPillText");
+  if (!last) { t.textContent = "crew not tested yet"; return; }
+  t.textContent = last.outcome === "built" ? "live crew" : "crew degraded" + (last.role ? " (" + last.role + ")" : "");
+}
+function refreshCrewPill() {
+  return fetch("crew/status", { cache: "no-store" }).then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((j) => setCrewPill(j.lastBuild)).catch(() => { $("crewPillText").textContent = "crew offline"; });
+}
+refreshCrewPill();
+// What a user can actually see differ between two game states; empty means the game is unchanged.
+const CONFIG_LABELS = { title: "title", emoji: "bird", pipeEmoji: "obstacles", bgEffect: "background",
+  birdColor: "bird colour", theme: "colours", gravity: "gravity", jump: "flap power", gap: "pipe gap", speed: "speed" };
+function configChanges(before, after) {
+  return Object.keys(CONFIG_LABELS).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]))
+    .map((k) => CONFIG_LABELS[k]);
+}
 // Apply the crew's real config to the form (arbitrary birdEmoji supported since #169).
 function applyLiveConfig(c) {
   if (!c) return;
@@ -1233,8 +1192,9 @@ function applyLiveConfig(c) {
   }
   if (c.birdColor) $("birdColor").value = c.birdColor;
   if (typeof c.birdEmoji === "string") setBirdEmoji(c.birdEmoji);
-  if (typeof c.pipeEmoji === "string") pipeEmoji = c.pipeEmoji;  // #177: crew-chosen obstacle shape
-  if (typeof c.bgEffect === "string") bgEffect = c.bgEffect;     // #178: crew-chosen animated bg
+  // Absent means "none": otherwise the obstacles/background of the previous prompt stay on screen.
+  pipeEmoji = typeof c.pipeEmoji === "string" ? c.pipeEmoji : "";  // #177: crew-chosen obstacle shape
+  bgEffect = typeof c.bgEffect === "string" ? c.bgEffect : "";     // #178: crew-chosen animated bg
   num("gravity", c.gravity); num("jump", c.jump); num("gap", c.gap); num("speed", c.speed);
   if (c.gravity != null || c.speed != null) $("preset").value = "custom";
   syncLabels();
@@ -1249,7 +1209,7 @@ $("buildBtn").addEventListener("click", async () => {
   // IMMEDIATE feedback the instant the button is clicked: show the crew screen reaching over the
   // tunnel BEFORE we contact the bridge. Without this the button just greyed and sat silently while
   // `liveBuild` was in flight (a few seconds live, or a slow 502 when the bridge is down) — which
-  // reads as "nothing happens". runBuild() re-inits this same overlay when a build actually starts.
+  // reads as "nothing happens".
   $("auctionFeed").innerHTML = "";
   $("buildBar").style.width = "0%";
   $("buildStep").textContent = "🛰 Reaching the agent crew over the tunnel…";
@@ -1305,12 +1265,20 @@ $("buildBtn").addEventListener("click", async () => {
       });
       $("buildBar").style.width = "100%";
       setFlowStage(FLOW_LABELS.length - 1, false, "delivered ✓");
+      const before = JSON.parse(JSON.stringify(readConfig()));
       applyLiveConfig(term.config);
+      const changed = configChanges(before, JSON.parse(JSON.stringify(readConfig())));
       startPreview();
+      refreshCrewPill();
       await sleep(500);
       hideBuild();
+      if (changed.length === 0) {
+        msg.className = "pmsg reject";
+        msg.textContent = "⚠ The crew answered, but its result equals your current game, so nothing changed. Try a more specific prompt.";
+        return;
+      }
       msg.className = "pmsg ok";
-      msg.textContent = "✓ Built live by the crew over the tunnel. Keep prompting to refine, or download below.";
+      msg.textContent = "✓ Built live by the crew over the tunnel — changed: " + changed.join(", ") + ". Keep prompting to refine, or download below.";
       return;
     }
     if (term && term.stage === "rejected") {
@@ -1321,20 +1289,29 @@ $("buildBtn").addEventListener("click", async () => {
     }
     // 2) FALLBACK — the crew bridge is unreachable / errored (term is null or {stage:"error"}); use
     //    the local stand-in (its own regex guard still applies, and #170's honest no-op for
-    //    out-of-vocabulary prompts).
+    //    out-of-vocabulary prompts). It runs in this browser, so no crew or auction is shown for it.
+    refreshCrewPill();
+    const failed = term && term.role ? "The crew's " + term.role + " role failed" : "The live crew is unreachable";
     const g = guardPrompt(p);
-    if (!g.ok) { hideBuild(); msg.className = "pmsg reject"; msg.textContent = "⛔ Rejected — " + g.reason + " Your current game is kept."; return; }
+    if (!g.ok) {
+      hideBuild(); msg.className = "pmsg reject";
+      // After a crew failure the prompt was not rejected: safety passed, the build did not.
+      msg.textContent = term && term.role ? "⚠ " + failed + ", so nothing changed. Your current game is kept. Please retry."
+        : "⛔ Rejected — " + g.reason + " Your current game is kept.";
+      return;
+    }
     const changes = interpretPrompt(p);
     if (changes.length === 0) {
       hideBuild();
       msg.className = "pmsg reject";
-      msg.textContent = "⚠ The live crew is unreachable and the offline stand-in only maps common game words " +
+      msg.textContent = "⚠ " + failed + " and the offline stand-in only maps common game words " +
         "(bird, theme, colour, difficulty, speed) — it couldn't place that, so nothing changed. Try those, or retry when the crew is up.";
       return;
     }
-    await runBuild();
-    msg.className = "pmsg ok";
-    msg.textContent = "✓ Built (offline stand-in — live crew unreachable) — applied: " + changes.join(", ") + ".";
+    startPreview();
+    hideBuild();
+    msg.className = "pmsg reject";
+    msg.textContent = "⚠ " + failed + ". Nothing was built by the crew; the offline stand-in in your browser applied: " + changes.join(", ") + ".";
   } finally {
     $("buildBtn").disabled = false;
   }

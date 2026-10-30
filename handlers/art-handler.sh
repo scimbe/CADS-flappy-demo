@@ -87,6 +87,24 @@ log() {
 
 LLM_TIMEOUT="${CT_HANDLER_TIMEOUT:-45}"
 LLM="${CT_LLM_CMD:-claude}"
+# The bridge must be able to tell a real fragment from a failure, so a failed LLM call NEVER
+# prints plausible default values: those were reported as a successful build while the game
+# stayed unchanged. Exit 0 on purpose so the channel delivers the reason to the bridge, which
+# fails over to the standby or reports the failure. ct-agent drops handler stderr, so this
+# reply is also the only place the cause becomes visible (bridge logs it, browser never sees it).
+ROLE_MODEL="${LITELLM_MODEL:-$(basename "$LLM")}"
+export ROLE_MODEL
+emit_failure() {
+  LLM_STATUS="$1" LLM_DETAIL="$2" python3 -c '
+import json, os
+print(json.dumps({"error": "llm_failed", "llm_status": os.environ["LLM_STATUS"], "detail": os.environ["LLM_DETAIL"][:200]}))'
+}
+# Tags the fragment with the model that really produced it (the build screen shows it).
+tag_model() {
+  python3 -c '
+import json, os, sys
+d = json.loads(sys.stdin.read()); d["_model"] = os.environ["ROLE_MODEL"]; print(json.dumps(d))' 2>/dev/null
+}
 INPUT="$(cat)"
 log "start input_len=${#INPUT}"
 T0=$(date +%s)
@@ -128,15 +146,18 @@ OUT="$(timeout "$LLM_TIMEOUT" "$LLM" -p "$INPUT" --output-format text \
   --append-system-prompt "$SYS" 2>"$LLM_STDERR")"
 LLM_STATUS=$?
 [ $LLM_STATUS -eq 124 ] && log "warn llm_timeout after=${LLM_TIMEOUT}s"
-[ -s "$LLM_STDERR" ] && log "warn llm_stderr: $(tr '\n' ' ' < "$LLM_STDERR")"
+LLM_DETAIL="$(tr '\n' ' ' < "$LLM_STDERR")"
+[ -n "$LLM_DETAIL" ] && log "warn llm_stderr: $LLM_DETAIL"
 rm -f "$LLM_STDERR"
 
 JSON="$(printf '%s' "$OUT" | extract_json_object | complete_palette)"
 DUR=$(( $(date +%s) - T0 ))
-if printf '%s' "$JSON" | grep -q '"theme"'; then
-  log "done outcome=ok duration=${DUR}s"
-  printf '%s\n' "$JSON"
+TAGGED=""
+if printf '%s' "$JSON" | grep -q '"theme"'; then TAGGED="$(printf '%s' "$JSON" | tag_model)"; fi
+if [ -n "$TAGGED" ]; then
+  log "done outcome=ok duration=${DUR}s model=${ROLE_MODEL}"
+  printf '%s\n' "$TAGGED"
 else
-  log "done outcome=fallback duration=${DUR}s llm_status=${LLM_STATUS}"
-  printf '{"theme":"day","birdColor":"#f7d51d","birdEmoji":"","title":"My Flappy Bird"}\n'
+  log "done outcome=failed duration=${DUR}s llm_status=${LLM_STATUS}"
+  emit_failure "$LLM_STATUS" "$LLM_DETAIL"
 fi
